@@ -19,8 +19,8 @@
 
 這是純靜態網頁，不需要伺服器：
 
-1. 把程式合併到 `main`
-2. GitHub repo → Settings → Pages → Build and deployment 選「Deploy from a branch」，Branch 選 `main`、資料夾 `/ (root)`
+1. GitHub repo → Settings → Pages → Build and deployment 的 Source 選「GitHub Actions」（選了就生效，不用按 Save）
+2. 每次 `main` 有更新，`.github/workflows/pages.yml` 會自動跑測試並發佈；可以在 Actions 分頁看進度，也能手動按「Run workflow」
 3. 幾分鐘後用手機打開 `https://<帳號>.github.io/couple-game/` 就能玩
 
 連線用的是 [PeerJS](https://peerjs.com/) 免費的配對伺服器，配對完兩支手機直接 P2P 連線。少數行動網路會擋 P2P，連不上時請兩人連同一個 Wi-Fi。
