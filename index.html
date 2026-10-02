@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#4fb8e8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>釣到你了！</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎣</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <section id="s-home" class="screen active">
+      <div class="home-inner">
+        <div class="logo">🎣</div>
+        <h1>釣到你了！</h1>
+        <p class="sub">兩支手機連線，一人當魚、一人當漁夫</p>
+
+        <label class="field">
+          <span>你的暱稱</span>
+          <input id="name" maxlength="8" placeholder="例如：寶貝" autocomplete="off">
+        </label>
+
+        <button id="btn-host" class="btn big primary">開房間</button>
+
+        <div class="divider"><span>或加入對方的房間</span></div>
+
+        <div class="join-row">
+          <input id="join-code" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="4 位數房號" autocomplete="off">
+          <button id="btn-join" class="btn big">加入</button>
+        </div>
+        <p id="home-msg" class="msg"></p>
+
+        <details class="howto">
+          <summary>怎麼玩？</summary>
+          <ol>
+            <li><b>暗流試探</b>：魚游到浮標旁邊，按住「假咬」或「真咬」。真咬才能吃到餌，但會被釣；漁夫看不到魚，只看得到浮標和魚影，要在魚<b>真咬</b>的時候按「提竿」。提竿落空會少一個餌。</li>
+            <li>魚吃掉 3 個餌就贏；45 秒內都沒吃完，魚會餓暈被撈走。</li>
+            <li><b>熱血拔河</b>：漁夫狂點「收線」，但張力太高會斷線。魚在畫面上滑動掙扎，漁夫要在 0.8 秒內<b>往反方向滑</b>擋下來。魚跳出水面時漁夫要<b>放手</b>！</li>
+            <li>每個角色都有一招大絕，集滿氣就能放。一共 6 局，最後一局分數 ×2，輸的人轉懲罰輪盤。</li>
+          </ol>
+        </details>
+      </div>
+    </section>
+
+    <section id="s-lobby" class="screen">
+      <div class="panel">
+        <h2 id="lobby-title">建立房間中…</h2>
+        <div id="lobby-code" class="room-code"></div>
+        <div id="lobby-qr" class="qr"></div>
+        <p id="lobby-hint" class="hint"></p>
+        <button id="btn-share" class="btn" hidden>分享邀請連結</button>
+        <button class="btn ghost" data-act="home">取消</button>
+      </div>
+    </section>
+
+    <section id="s-setup" class="screen"></section>
+    <section id="s-rps" class="screen"></section>
+    <section id="s-select" class="screen"></section>
+    <section id="s-reveal" class="screen"></section>
+
+    <section id="s-play" class="screen">
+      <canvas id="pond"></canvas>
+      <div class="hud-top">
+        <div class="scorebar">
+          <span class="who me" id="h-me"></span>
+          <b id="h-score-me">0</b>
+          <span class="vs">:</span>
+          <b id="h-score-op">0</b>
+          <span class="who op" id="h-op"></span>
+        </div>
+        <div class="hud-row">
+          <span id="h-round" class="pill"></span>
+          <span id="h-timer" class="pill timer"></span>
+          <button id="btn-pause" class="pill icon" aria-label="暫停">⏸</button>
+        </div>
+        <div id="h-status" class="hud-row status"></div>
+      </div>
+      <div id="fight-hud" hidden>
+        <div class="meter">
+          <span class="meter-label">距離</span>
+          <div class="bar distance"><div id="h-dist-fill"></div><span id="h-dist-fish" class="marker"></span></div>
+          <span id="h-dist" class="meter-val"></span>
+        </div>
+        <div class="meter">
+          <span class="meter-label">張力</span>
+          <div class="bar tension"><div id="h-tension-fill"></div><div id="h-tension-danger" class="danger"></div></div>
+          <span id="h-tension" class="meter-val"></span>
+        </div>
+        <div class="meter">
+          <span class="meter-label">體力</span>
+          <div class="bar stamina"><div id="h-stamina-fill"></div></div>
+          <span class="meter-val"></span>
+        </div>
+      </div>
+      <div id="eat-bar" class="eat-bar" hidden><div id="eat-fill"></div><span>吃餌進度</span></div>
+      <div id="banner" class="banner"></div>
+      <div id="counter" class="counter" hidden><div class="arrow" id="counter-arrow"></div><div class="counter-time"><div id="counter-fill"></div></div></div>
+      <p id="hint" class="play-hint"></p>
+      <div id="controls" class="controls"></div>
+      <div id="ink" class="ink" hidden></div>
+      <div id="pause-overlay" class="overlay" hidden>
+        <div class="panel">
+          <h2>⏸ 暫停中</h2>
+          <p>上菜了嗎？慢慢吃～</p>
+          <button class="btn big primary" data-act="resume">繼續</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="s-roundEnd" class="screen"></section>
+    <section id="s-final" class="screen"></section>
+
+    <div id="overlay-lost" class="overlay" hidden>
+      <div class="panel">
+        <h2>😢 連線中斷</h2>
+        <p id="lost-msg">對方好像離開了。</p>
+        <button class="btn big primary" data-act="home">回首頁</button>
+      </div>
+    </div>
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="vendor/peerjs.min.js"></script>
+  <script src="vendor/qrcode.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
