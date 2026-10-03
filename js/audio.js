@@ -76,6 +76,7 @@ const SOUNDS = {
   win: () => [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, dur: 0.18, type: 'triangle', vol: 0.15, delay: i * 0.12 })),
   lose: () => [392, 330, 262].forEach((f, i) => tone({ freq: f, dur: 0.25, type: 'triangle', vol: 0.15, delay: i * 0.18 })),
   tick: () => tone({ freq: 1000, dur: 0.04, vol: 0.06 }),
+  creak: () => [0, 0.07, 0.14].forEach((d) => tone({ freq: 180, to: 120, dur: 0.06, type: 'sawtooth', vol: 0.12, delay: d })),
 };
 
 export function sfx(name) {

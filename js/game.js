@@ -192,6 +192,7 @@ function startFight(r) {
     d: RULES.startDistance,
     T: RULES.tensionBase,
     slackFor: 0,
+    overFor: 0, // 張力超過上限多久了
     fishSt: 100,
     fisherSt: 100,
     y: r.fishPos.y, // 魚的深度；水平位置由距離 d 決定
@@ -271,14 +272,21 @@ function stepFight(r) {
   }
   // 線鬆掉時不會自己繃緊，只能靠收線拉回來
   if (f.T > RULES.slackLimit) f.T += (RULES.tensionBase - f.T) * Math.min(1, RULES.tensionRelax * dt);
-  f.T = Math.max(0, f.T);
+  // 上限：爆表時只要馬上停手，寬限時間內就降得回來
+  f.T = Math.max(0, Math.min(fisherData.snapAt + 30, f.T));
   f.y += (f.targetY - f.y) * Math.min(1, 2.5 * dt);
 
   const steady = active(r, 'steady');
   if (steady) f.T = 50;
   f.d = Math.max(0, f.d);
 
-  if (f.T >= fisherData.snapAt) return end(r, 'fish', 'snap');
+  if (f.T >= fisherData.snapAt) {
+    if (f.overFor === 0) emit(r, 'overload');
+    f.overFor += dt;
+    if (f.overFor >= RULES.snapGrace) return end(r, 'fish', 'snap');
+  } else {
+    f.overFor = 0;
+  }
   if (!steady && f.T <= RULES.slackLimit) f.slackFor += dt;
   else f.slackFor = 0;
   if (f.slackFor >= RULES.slackTime) return end(r, 'fish', 'unhook');
@@ -365,7 +373,7 @@ function useUlt(r, side) {
       }
       break;
     case 'shark':
-      f.T += 45;
+      f.T += 55;
       break;
     case 'puffer':
       r.effects.puff = c + 3;
