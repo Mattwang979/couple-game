@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRound, stepRound, applyInput, bobberDip } from '../js/game.js';
+import { createRound, stepRound, applyInput, bobberDip, counterDir } from '../js/game.js';
 import { RULES } from '../js/data.js';
 
 const DT = 1 / 30;
@@ -132,6 +132,34 @@ test('瘋狂連點會斷線', () => {
   assert.equal(r.result.reason, 'snap');
 });
 
+test('張力短暫爆表後馬上停手不會斷', () => {
+  const r = fight('carp', 'pirate');
+  r.fight.T = 110;
+  stepRound(r, DT, rng);
+  assert.ok(r.fight.overFor > 0);
+  assert.equal(r.events.at(-1).type, 'overload');
+  run(r, RULES.snapGrace + 0.5);
+  assert.equal(r.phase, 'fight');
+  assert.equal(r.fight.overFor, 0);
+});
+
+test('每秒穩定點 8 下，面對會掙扎的魚也釣得起來', () => {
+  const r = fight('carp', 'scientist');
+  const dirs = ['right', 'up', 'right', 'down'];
+  let n = 0;
+  for (let i = 0; i < 30 * 60 && r.phase === 'fight'; i++) {
+    // 魚每 3 秒掙扎一次，漁夫擋下一半
+    if (i % 90 === 0) {
+      const dir = dirs[n++ % dirs.length];
+      applyInput(r, 'fish', { type: 'swipe', dir });
+      if (n % 2 === 0) applyInput(r, 'fisher', { type: 'swipe', dir: counterDir(dir) });
+    }
+    if (i % 4 === 0 || i % 15 === 0) applyInput(r, 'fisher', { type: 'reel' });
+    stepRound(r, DT, rng);
+  }
+  assert.equal(r.result.reason, 'caught');
+});
+
 test('往上竄或下潛會改變魚的深度', () => {
   const r = fight();
   const y = r.fight.y;
@@ -194,7 +222,7 @@ test('大招要集滿氣才能用，而且一局只能用一次', () => {
   assert.equal(r.fight.T, T);
   r.ult.fish.charge = 100;
   applyInput(r, 'fish', { type: 'ult' });
-  assert.equal(r.fight.T, T + 45);
+  assert.equal(r.fight.T, T + 55);
   assert.equal(r.ult.fish.used, true);
 });
 

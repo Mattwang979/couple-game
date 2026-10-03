@@ -21,9 +21,10 @@ export const RULES = {
   escapeDistance: 65,
   fishPull: 0.9, // 魚每秒往外拉幾公尺（滿體力）
   tensionBase: 30,
-  tensionRelax: 1.2, // 張力回到基準的速度
-  reelDistance: 0.35, // 每點一下收幾公尺
-  reelTension: 6, // 每點一下張力增加
+  tensionRelax: 1.4, // 張力回到基準的速度
+  reelDistance: 0.45, // 每點一下收幾公尺
+  reelTension: 5.5, // 每點一下張力增加（穩定每秒 7～9 下最剛好，狂點會爆）
+  snapGrace: 0.35, // 張力超過上限要持續多久才會斷線（給反應時間、抵銷延遲）
   reelCost: 1.5, // 每點一下消耗漁夫體力
   tiredReel: 0.5, // 漁夫體力 < 20 時收線效率
   slackLimit: 8, // 張力低於這個值算鬆線
@@ -36,7 +37,7 @@ export const RULES = {
   jumpAir: 1.0, // 在空中的時間
   jumpGap: 0.4, // 鯉躍龍門連跳間隔
   jumpCooldown: 2.5,
-  jumpReelTension: 28, // 魚在空中時收線的張力懲罰
+  jumpReelTension: 20, // 魚在空中時收線的張力懲罰
   fishRegen: 6,
   fisherRegen: 10,
 
@@ -80,7 +81,7 @@ export const FISH = {
     biteRange: 0.09,
     tell: true,
     passive: '拔河力量 +30%，但魚影超大很好找',
-    ult: { name: '咬斷', desc: '拔河時線的張力瞬間 +45', phases: ['fight'] },
+    ult: { name: '咬斷', desc: '拔河時線的張力瞬間 +55', phases: ['fight'] },
   },
   puffer: {
     id: 'puffer',

@@ -29,6 +29,8 @@ export class PlayScreen {
     this.phaseSeenAt = 0;
     this.impulse = 0; // 事件造成的畫面震動，會慢慢衰減
     this.flickAt = -9;
+    this.inDanger = false;
+    this.lastDangerBuzz = 0;
     this.joy = null;
     this.keys = new Set();
     this.bite = 'none';
@@ -356,7 +358,15 @@ export class PlayScreen {
         case 'reelAir':
           if (isFisher) {
             vibrate(30);
-            this.banner('張力爆表！⚠️', '#ff4d4f');
+            this.banner('魚在空中！別收線！⚠️', '#ff4d4f');
+          }
+          break;
+        case 'overload':
+          // 張力超過上限，寬限時間內停手還來得及
+          this.impulse = Math.max(this.impulse, 14);
+          if (isFisher) {
+            sfx('creak');
+            vibrate(150);
           }
           break;
         case 'ult': {
@@ -429,7 +439,7 @@ export class PlayScreen {
         break;
       case 'fisher-fight':
         el.innerHTML = `${ult}<button class="ctl main" data-ctl="reel"><span class="e">🌀</span>收線</button>`;
-        hint.textContent = '狂點收線 · 魚掙扎時往箭頭方向滑';
+        hint.textContent = '穩穩點收線，張力變紅就停手 · 魚掙扎時往箭頭方向滑';
         break;
       default:
         el.innerHTML = '';
@@ -489,6 +499,19 @@ export class PlayScreen {
       tFill.style.background = slack ? '#9aa3b5' : tPct > 85 ? 'var(--bad)' : tPct > 60 ? 'var(--warn)' : 'var(--good)';
       $('h-tension-danger').style.width = '15%';
       $('h-tension').textContent = slack ? '鬆！' : `${Math.round(f.T)}`;
+
+      // 張力進入危險區：漁夫的手機一直震、張力條閃紅，進入時提醒一次
+      const danger = tPct >= 85;
+      tFill.parentElement.classList.toggle('danger-on', danger);
+      if (side === 'fisher') {
+        const t = performance.now();
+        if (danger && !this.inDanger) this.banner('快斷了！先停手！✋', '#ff4d4f');
+        if (danger && t - this.lastDangerBuzz > 400) {
+          this.lastDangerBuzz = t;
+          vibrate(60);
+        }
+      }
+      this.inDanger = danger;
       const st = side === 'fish' ? f.fishSt : f.fisherSt;
       $('h-stamina-fill').style.width = `${st}%`;
     }
