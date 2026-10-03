@@ -1,13 +1,14 @@
 // 對戰畫面：操作輸入、HUD、特效、事件回饋。
 
 import { FISH, FISHERS, RULES, SHOUTS } from './data.js';
-import { canUlt, fishInRange, counterDir, isFrozen } from './game.js';
+import { canUlt, fishInRange, counterDir, isFrozen, pingCooldown, inSeaweed } from './game.js';
 import { sideOf, other } from './match.js';
 import { Renderer, fightX, QUALITY } from './render.js';
 import { sfx, vibrate, unlockAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const ARROW = { left: '⬅', right: '➡', up: '⬆', down: '⬇' };
+const DASH_WORD = { right: '往外衝', left: '衝向你', up: '往上竄', down: '往下潛' };
 const CONFETTI = ['#ff6f91', '#ffd84d', '#4fb8e8', '#7ee0c3', '#b7a6ff', '#ff9f43'];
 const QUALITY_KEY = 'couple-fishing-quality';
 const QUALITY_ORDER = ['high', 'medium', 'low'];
@@ -57,6 +58,9 @@ export class PlayScreen {
     this.hitStopUntil = 0;
     this.hitFlash = 0;
     this.castAt = -9;
+    this.react = { kind: null, at: -9 }; // 漁夫角色對衝刺的反應（擋下 / 被拖走）
+    this.lastDenied = -9;
+    this.lastHeartbeat = 0;
     this.shouts = []; // { who, text, t0 }
     this.hud = new Map(); // 上次寫進 DOM 的值，沒變就不寫
     this.lastCombo = 0;
@@ -168,7 +172,9 @@ export class PlayScreen {
       const p = this.displayPos;
       if (this.prevPos) {
         const speed = Math.hypot(p.x - this.prevPos.x, p.y - this.prevPos.y) / Math.max(dt, 0.001);
-        if (speed > 0.1 && now - this.lastBubble > 0.18) {
+        // 躲在海草叢裡不冒氣泡，漁夫找不到線索
+        const hiding = inSeaweed(p);
+        if (speed > 0.1 && !hiding && now - this.lastBubble > 0.18) {
           this.lastBubble = now;
           this.addParticle({ kind: 'bubble', x: p.x - p.dir * 0.03, y: p.y, size: 2 + Math.random() * 3, dur: 1.6 }, now);
         }
@@ -210,6 +216,14 @@ export class PlayScreen {
     if (side === 'fish' && this.bite !== 'none' && r.phase === 'lure' && !this.inRange(r)) this.setBite('none');
 
     this.handleEvents(r, now);
+    // 等魚最後 10 秒：心跳越來越快
+    if (r.phase === 'lure' && !m.paused) {
+      const left = r.phaseEnd - r.clock;
+      if (left <= RULES.hurryTime && left > 0 && realNow - this.lastHeartbeat > 0.35 + (left / RULES.hurryTime) * 0.45) {
+        this.lastHeartbeat = realNow;
+        sfx('heart');
+      }
+    }
     this.particles = this.particles.filter((p) => now - p.t0 < p.dur);
     const cap = QUALITY[this.renderer.level].particles;
     if (this.particles.length > cap) this.particles.splice(0, this.particles.length - cap);
@@ -224,6 +238,7 @@ export class PlayScreen {
       shake,
       flickT: now - this.flickAt,
       castT: now - this.castAt,
+      react: { kind: this.react.kind, t: now - this.react.at },
       ready: { fish: canUlt(r, 'fish'), fisher: canUlt(r, 'fisher') },
       bubbles: this.shouts,
       hitFlash: this.hitFlash,
@@ -399,6 +414,10 @@ export class PlayScreen {
           break;
         case 'dash':
           sfx('dash');
+          if (isFisher) {
+            sfx('alarm');
+            vibrate([80, 40, 80]);
+          }
           this.impulse = Math.max(this.impulse, 6);
           if (e.id % 2 === 0) this.shout('fish', 'dash', e, r.fish, now);
           this.bubbles(this.fightPos.x, this.fightPos.y, now, 8);
@@ -408,6 +427,7 @@ export class PlayScreen {
           sfx('block');
           this.banner(isFisher ? '擋下了！💪' : '被擋住了！');
           this.impact('BLOCK!', '#7ecbff', now);
+          this.react = { kind: 'brace', at: now };
           this.hitStop(0.08);
           this.shout('fisher', 'block', e, r.fisher, now);
           break;
@@ -415,6 +435,7 @@ export class PlayScreen {
           sfx('hit');
           this.impulse = 16;
           this.impact({ right: '+7m!', left: '鬆線!', up: '+5m!', down: '+5m!' }[e.dir], '#ff6b6b', now);
+          this.react = { kind: 'stumble', at: now };
           this.hitStop(0.08);
           this.shout('fish', 'hit', e, r.fish, now);
           if (e.dir === 'left') this.banner(isFisher ? '線鬆了！快收線！' : '衝向漁夫！線鬆了！');
@@ -447,6 +468,28 @@ export class PlayScreen {
           }
           this.impact('危險!', '#ff4d4f', now);
           this.shout('fisher', 'danger', e, r.fisher, now);
+          break;
+        case 'dashDenied':
+          if (!isFisher && now - this.lastDenied > 1) {
+            this.lastDenied = now;
+            this.banner(e.reason === 'gauge' ? '衝刺還沒集滿！先狂點掙扎' : '現在不能衝刺！');
+          }
+          break;
+        case 'ping':
+          sfx('sonar');
+          if (isFisher) this.banner(e.found ? '📡 找到了！' : '📡 沒找到…', e.found ? '#7dffb0' : '#fff');
+          else this.banner(e.found ? '被聲納掃到了！快跑！' : '躲過聲納了 😏', e.found ? '#ff6b6b' : '#7dffb0');
+          break;
+        case 'shrimpSpawn':
+          sfx('tap');
+          break;
+        case 'shrimp':
+          sfx('eaten');
+          this.bubbles(e.x, e.y, now, 8);
+          this.addParticle({ kind: 'text', x: e.x, y: e.y - 0.06, text: isFisher ? '🦐 被吃掉了' : '🦐 好吃！大招 +40', size: 18, dur: 1.4 }, now);
+          break;
+        case 'hurry':
+          this.banner(isFisher ? '最後 10 秒！' : '快餓暈了！快吃餌！', '#ff6b6b');
           break;
         case 'combo':
           this.impact(`${e.combo} COMBO!`, e.combo >= 30 ? '#ff6b3d' : '#ffd84d', now);
@@ -518,16 +561,16 @@ export class PlayScreen {
         hint.textContent = '拖曳畫面游動 · 游到魚鉤旁按住咬餌';
         break;
       case 'fisher-lure':
-        el.innerHTML = `${ult}<button class="ctl main" data-ctl="yank"><span class="e">🎣</span>提竿！</button>`;
-        hint.textContent = '點水裡拋竿（點多深鉤子就沉多深）· 魚真咬時提竿';
+        el.innerHTML = `<button class="ctl gauge ping" data-ctl="ping"><span class="e">📡</span>聲納</button>${ult}<button class="ctl main" data-ctl="yank"><span class="e">🎣</span>提竿！</button>`;
+        hint.textContent = '用聲納找魚 · 點水裡拋竿 · 魚真咬時提竿';
         break;
       case 'fish-fight':
-        el.innerHTML = `<button class="ctl main" data-ctl="jump"><span class="e">🐬</span>跳！</button>${ult}`;
-        hint.textContent = '滑動掙扎：➡ 往外衝 · ⬅ 衝向漁夫（線會鬆）· ⬆⬇ 竄游';
+        el.innerHTML = `<button class="ctl" data-ctl="jump"><span class="e">🐬</span>跳！</button><button class="ctl main gauge struggle" data-ctl="struggle"><span class="e">💪</span>掙扎！</button>${ult}`;
+        hint.textContent = '狂點掙扎跟漁夫比手速！集滿氣後滑動畫面衝刺';
         break;
       case 'fisher-fight':
         el.innerHTML = `${ult}<button class="ctl main" data-ctl="reel"><span class="e">🌀</span>收線</button>`;
-        hint.textContent = '穩穩點收線，張力變紅就停手 · 魚掙扎時往箭頭方向滑';
+        hint.textContent = '狂點收線跟魚比手速，張力變紅就停手 · 魚衝刺時按紅色按鈕';
         break;
       default:
         el.innerHTML = '';
@@ -629,6 +672,11 @@ export class PlayScreen {
       this.style('h-tension-danger', 'width', '15%');
       this.text('h-tension', slack ? '鬆！' : `${Math.round(f.T)}`);
       this.bar('h-stamina-fill', (side === 'fish' ? f.fishSt : f.fisherSt) / 100);
+      // 力量對決：誰最近點得快，藍色（漁夫）就往右推或被往左推
+      const total = f.fisherRate + f.fishRate;
+      const share = total > 0.5 ? f.fisherRate / total : 0.5;
+      this.bar('h-power-fill', share);
+      this.style('h-power-spark', 'left', `${(share * 100).toFixed(0)}%`);
 
       // 張力進入危險區：漁夫的手機一直震、張力條閃紅，進入時提醒一次
       danger = tFrac >= 0.85;
@@ -661,12 +709,14 @@ export class PlayScreen {
     }
     this.lastCombo = combo;
 
-    // 反應提示：漁夫看到要往哪滑
+    // 魚衝刺時：漁夫的大型反制按鈕（點按鈕或往箭頭方向滑都可以）
     const dash = r.fight?.dash;
     const showCounter = side === 'fisher' && r.phase === 'fight' && dash && !dash.resolved;
     this.hide('counter', !showCounter);
+    this.counterDir = showCounter ? counterDir(dash.dir) : null;
     if (showCounter) {
-      this.html('counter-arrow', `${ARROW[counterDir(dash.dir)]}<small>往這邊滑！</small>`);
+      this.text('counter-arrow', ARROW[counterDir(dash.dir)]);
+      this.html('counter-text', `魚${DASH_WORD[dash.dir]} ${ARROW[dash.dir]}！<br>點這裡拉回來！`);
       const total = RULES.dashWindow * (r.clock < r.effects.sonar ? 2 : 1);
       this.bar('counter-fill', (dash.deadline - r.clock) / total);
     }
@@ -705,6 +755,28 @@ export class PlayScreen {
         yankBtn.disabled = !can;
       }
       this.text('hint', !L.bobber ? (r.clock < L.readyAt ? '換餌中…' : '點水面拋竿！') : '點水面可以換位置 · 魚真咬時提竿');
+    }
+    if (mode === 'fish-fight') {
+      const g = Math.round(r.fight.dashGauge);
+      const btn = $('controls').querySelector('[data-ctl="struggle"]');
+      if (btn && this.hud.get('ctl-gauge') !== g) {
+        this.hud.set('ctl-gauge', g);
+        btn.style.setProperty('--p', g);
+        btn.classList.toggle('ready', g >= 100);
+      }
+      this.text('hint', g >= 100 ? '⚡ 衝刺集滿了！滑動畫面衝刺！' : '狂點掙扎跟漁夫比手速！集滿氣後滑動畫面衝刺');
+    }
+    if (mode === 'fisher-lure') {
+      const btn = $('controls').querySelector('[data-ctl="ping"]');
+      const cd = pingCooldown(r.fisher);
+      const left = Math.max(0, L.pingReadyAt - r.clock);
+      const p = Math.round((1 - left / cd) * 100);
+      if (btn && this.hud.get('ctl-ping') !== p) {
+        this.hud.set('ctl-ping', p);
+        btn.style.setProperty('--p', p);
+        btn.disabled = left > 0;
+        btn.classList.toggle('ready', left <= 0);
+      }
     }
     if (mode === 'fish-fight') {
       const f = r.fight;
@@ -785,6 +857,11 @@ export class PlayScreen {
     if (!down) return;
     if (name === 'ult') this.input({ type: 'ult' });
     else if (name === 'yank') this.input({ type: 'yank' });
+    else if (name === 'ping') this.input({ type: 'ping' });
+    else if (name === 'struggle') {
+      sfx('reel');
+      this.input({ type: 'struggle' });
+    }
     else if (name === 'jump') this.input({ type: 'jump' });
     else if (name === 'reel') {
       sfx('reel');
@@ -800,6 +877,11 @@ export class PlayScreen {
 
   bindInput() {
     $('btn-quality')?.addEventListener('click', () => this.cycleQuality());
+    $('counter').addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      unlockAudio();
+      if (this.counterDir) this.swipe(this.counterDir);
+    });
     const controls = $('controls');
     const pressed = new Map(); // pointerId → 控制名稱
     controls.addEventListener('pointerdown', (e) => {
@@ -905,9 +987,14 @@ export class PlayScreen {
       }
       if (e.repeat) return;
       if (key === 'u') this.control('ult', true);
+      if (key === 'p' && side === 'fisher') this.control('ping', true);
+      if (key === 'j' && side === 'fish' && r.phase === 'fight') this.control('jump', true);
+      if (key === 'Enter') {
+        if (this.counterDir) this.swipe(this.counterDir);
+      }
       if (key === ' ') {
         if (side === 'fisher') this.control(r.phase === 'fight' ? 'reel' : 'yank', true);
-        else if (r.phase === 'fight') this.control('jump', true);
+        else if (r.phase === 'fight') this.control('struggle', true);
       }
     });
     addEventListener('keyup', (e) => {

@@ -90,11 +90,61 @@ test('時間到魚餓暈，漁夫拿一半分數', () => {
   assert.equal(r.result.points, 75);
 });
 
+test('聲納有冷卻，魚躲在海草叢裡掃不到', () => {
+  const r = createRound({ fish: 'carp', fisher: 'oldman' });
+  applyInput(r, 'fisher', { type: 'ping' });
+  assert.equal(r.lure.ping.found, true);
+  const first = r.lure.ping.at;
+  run(r, 1);
+  applyInput(r, 'fisher', { type: 'ping' });
+  assert.equal(r.lure.ping.at, first, '冷卻中不能再掃');
+  run(r, RULES.pingCooldown);
+  applyInput(r, 'fish', { type: 'move', x: 0.36, y: 0.8 });
+  applyInput(r, 'fisher', { type: 'ping' });
+  assert.equal(r.lure.ping.found, false);
+  assert.equal(r.events.at(-1).type, 'ping');
+});
+
+test('科學家的聲納冷卻比較短', () => {
+  const r = createRound({ fish: 'carp', fisher: 'scientist' });
+  applyInput(r, 'fisher', { type: 'ping' });
+  run(r, 3.6);
+  applyInput(r, 'fisher', { type: 'ping' });
+  assert.ok(r.lure.ping.at > 3);
+});
+
+test('吃到小蝦會加大招氣和吃餌進度', () => {
+  const r = createRound({ fish: 'carp', fisher: 'oldman' });
+  applyInput(r, 'fish', { type: 'move', x: 0.1, y: 0.1 });
+  run(r, RULES.shrimpFirst + 0.05);
+  const sh = r.lure.shrimp;
+  assert.ok(sh);
+  const charge = r.ult.fish.charge;
+  applyInput(r, 'fish', { type: 'move', x: sh.x, y: sh.y });
+  stepRound(r, DT, rng);
+  assert.equal(r.lure.shrimp, null);
+  assert.ok(r.ult.fish.charge >= charge + RULES.shrimpCharge - 1);
+  assert.equal(r.lure.progress, RULES.shrimpProgress);
+  assert.ok(r.events.some((e) => e.type === 'shrimp'));
+});
+
+test('最後 10 秒會提示一次', () => {
+  const r = createRound({ fish: 'carp', fisher: 'oldman' });
+  run(r, RULES.lureTime - RULES.hurryTime + 0.1);
+  assert.equal(r.events.filter((e) => e.type === 'hurry').length, 1);
+});
+
 test('沒拋竿會自動拋竿', () => {
   const r = createRound({ fish: 'carp', fisher: 'oldman' });
   run(r, RULES.autoCastAfter + 0.1);
   assert.ok(r.lure.bobber);
 });
+
+// 魚集滿衝刺氣後衝刺
+function dash(r, dir) {
+  r.fight.dashGauge = 100;
+  applyInput(r, 'fish', { type: 'swipe', dir });
+}
 
 function fight(fish = 'carp', fisher = 'oldman') {
   const r = lureReady(fish, fisher);
@@ -143,14 +193,13 @@ test('張力短暫爆表後馬上停手不會斷', () => {
   assert.equal(r.fight.overFor, 0);
 });
 
-test('每秒穩定點 8 下，面對會掙扎的魚也釣得起來', () => {
+test('雙方連點：漁夫每秒 8 下、魚每秒 6 下，漁夫拉得上來', () => {
   const r = fight('carp', 'scientist');
-  const dirs = ['right', 'up', 'right', 'down'];
   let n = 0;
   for (let i = 0; i < 30 * 60 && r.phase === 'fight'; i++) {
-    // 魚每 3 秒掙扎一次，漁夫擋下一半
-    if (i % 90 === 0) {
-      const dir = dirs[n++ % dirs.length];
+    if (i % 5 === 0) applyInput(r, 'fish', { type: 'struggle' });
+    if (r.fight.dashGauge >= 100) {
+      const dir = ['right', 'up', 'down'][n++ % 3];
       applyInput(r, 'fish', { type: 'swipe', dir });
       if (n % 2 === 0) applyInput(r, 'fisher', { type: 'swipe', dir: counterDir(dir) });
     }
@@ -158,6 +207,38 @@ test('每秒穩定點 8 下，面對會掙扎的魚也釣得起來', () => {
     stepRound(r, DT, rng);
   }
   assert.equal(r.result.reason, 'caught');
+});
+
+test('魚連點比漁夫快很多就會被拖走', () => {
+  const r = fight('carp', 'scientist');
+  for (let i = 0; i < 30 * 60 && r.phase === 'fight'; i++) {
+    if (i % 3 === 0) applyInput(r, 'fish', { type: 'struggle' }); // 每秒 10 下
+    if (i % 6 === 0) applyInput(r, 'fisher', { type: 'reel' }); // 每秒 5 下
+    stepRound(r, DT, rng);
+  }
+  assert.equal(r.result.winner, 'fish');
+});
+
+test('魚掙扎會拉遠、拉緊、扣體力、集衝刺氣', () => {
+  const r = fight();
+  const { d, T, fishSt } = r.fight;
+  applyInput(r, 'fish', { type: 'struggle' });
+  assert.ok(r.fight.d > d);
+  assert.ok(r.fight.T > T);
+  assert.ok(r.fight.fishSt < fishSt);
+  assert.equal(r.fight.dashGauge, RULES.dashGaugePerTap);
+  assert.ok(r.fight.fishRate > 0);
+});
+
+test('衝刺氣沒集滿不能衝，會發出提示事件；集滿才能衝', () => {
+  const r = fight();
+  applyInput(r, 'fish', { type: 'swipe', dir: 'right' });
+  assert.equal(r.fight.dash, null);
+  assert.equal(r.events.at(-1).type, 'dashDenied');
+  for (let i = 0; i < Math.ceil(100 / RULES.dashGaugePerTap); i++) applyInput(r, 'fish', { type: 'struggle' });
+  applyInput(r, 'fish', { type: 'swipe', dir: 'right' });
+  assert.equal(r.fight.dash.dir, 'right');
+  assert.equal(r.fight.dashGauge, 0);
 });
 
 test('連續收線會累積連擊，停手或魚在空中時收線會中斷', () => {
@@ -191,7 +272,7 @@ test('張力爆表會中斷連擊', () => {
 test('往上竄或下潛會改變魚的深度', () => {
   const r = fight();
   const y = r.fight.y;
-  applyInput(r, 'fish', { type: 'swipe', dir: 'down' });
+  dash(r, 'down');
   run(r, 1);
   assert.ok(r.fight.y > y + 0.1);
 });
@@ -199,7 +280,7 @@ test('往上竄或下潛會改變魚的深度', () => {
 test('魚掙扎時往反方向滑可以擋下', () => {
   const r = fight();
   const d = r.fight.d;
-  applyInput(r, 'fish', { type: 'swipe', dir: 'left' });
+  dash(r, 'left');
   applyInput(r, 'fisher', { type: 'swipe', dir: 'right' });
   assert.equal(r.fight.dash.outcome, 'block');
   assert.ok(r.fight.d - d < 1);
@@ -208,7 +289,7 @@ test('魚掙扎時往反方向滑可以擋下', () => {
 test('沒反應過來魚就衝出去', () => {
   const r = fight();
   const d = r.fight.d;
-  applyInput(r, 'fish', { type: 'swipe', dir: 'right' });
+  dash(r, 'right');
   run(r, RULES.dashWindow + 0.05);
   assert.equal(r.fight.dash.outcome, 'hit');
   assert.ok(r.fight.d - d > 6);
@@ -216,7 +297,7 @@ test('沒反應過來魚就衝出去', () => {
 
 test('往漁夫衝會讓線變鬆，沒處理就脫鉤', () => {
   const r = fight();
-  applyInput(r, 'fish', { type: 'swipe', dir: 'left' });
+  dash(r, 'left');
   run(r, RULES.dashWindow + 0.05);
   assert.ok(r.fight.T < RULES.slackLimit);
   run(r, RULES.slackTime);
@@ -225,7 +306,7 @@ test('往漁夫衝會讓線變鬆，沒處理就脫鉤', () => {
 
 test('線鬆掉時趕快收線可以救回來', () => {
   const r = fight();
-  applyInput(r, 'fish', { type: 'swipe', dir: 'left' });
+  dash(r, 'left');
   run(r, RULES.dashWindow + 0.05);
   applyInput(r, 'fisher', { type: 'reel' });
   applyInput(r, 'fisher', { type: 'reel' });
