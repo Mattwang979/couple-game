@@ -1,21 +1,34 @@
 // 對戰畫面：操作輸入、HUD、特效、事件回饋。
 
-import { FISH, FISHERS, RULES } from './data.js';
+import { FISH, FISHERS, RULES, SHOUTS } from './data.js';
 import { canUlt, fishInRange, counterDir, isFrozen } from './game.js';
 import { sideOf, other } from './match.js';
-import { Renderer, fightX } from './render.js';
+import { Renderer, fightX, QUALITY } from './render.js';
 import { sfx, vibrate, unlockAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const ARROW = { left: '⬅', right: '➡', up: '⬆', down: '⬇' };
 const CONFETTI = ['#ff6f91', '#ffd84d', '#4fb8e8', '#7ee0c3', '#b7a6ff', '#ff9f43'];
+const QUALITY_KEY = 'couple-fishing-quality';
+const QUALITY_ORDER = ['high', 'medium', 'low'];
+const QUALITY_LABEL = { auto: '自動', high: '高', low: '低' };
+
+function loadQualityMode() {
+  try {
+    const v = localStorage.getItem(QUALITY_KEY);
+    if (v === 'auto' || v === 'high' || v === 'low') return v;
+  } catch {}
+  return 'auto';
+}
 
 export class PlayScreen {
   // send(action)：送出玩家動作；getMatch()：最新比賽狀態；me：'host' | 'guest'
-  constructor({ send, getMatch, me }) {
+  // stateAge()：距離上次拿到新狀態過了幾毫秒（拿來推估時間，讓動畫連續）
+  constructor({ send, getMatch, me, stateAge = () => 0 }) {
     this.send = send;
     this.getMatch = getMatch;
     this.me = me;
+    this.stateAge = stateAge;
     this.canvas = $('pond');
     this.renderer = new Renderer(this.canvas);
     this.particles = [];
@@ -39,8 +52,16 @@ export class PlayScreen {
     this.lastBubble = 0;
     this.prevPos = null;
     this.inkWiped = 0;
-    this.inkUntil = 0;
     this.running = false;
+    this.animClock = 0; // 動畫用的時間；打擊停格時會暫停
+    this.hitStopUntil = 0;
+    this.hitFlash = 0;
+    this.castAt = -9;
+    this.shouts = []; // { who, text, t0 }
+    this.hud = new Map(); // 上次寫進 DOM 的值，沒變就不寫
+    this.lastCombo = 0;
+    this.quality = { mode: loadQualityMode(), level: 'high', ema: 16, badSince: 0 };
+    this.applyQuality();
     this.bindInput();
     addEventListener('resize', () => this.renderer.resize());
   }
@@ -65,8 +86,10 @@ export class PlayScreen {
     this.lastFrame = performance.now();
     const loop = (t) => {
       if (!this.running) return;
-      const dt = Math.min(0.1, (t - this.lastFrame) / 1000);
+      const raw = t - this.lastFrame;
+      const dt = Math.min(0.1, raw / 1000);
       this.lastFrame = t;
+      this.monitorQuality(raw, t / 1000);
       this.frame(dt, t / 1000);
       requestAnimationFrame(loop);
     };
@@ -81,10 +104,22 @@ export class PlayScreen {
 
   // ---------- 每一幀 ----------
 
-  frame(dt, now) {
+  frame(dt, realNow) {
     const m = this.getMatch();
-    const r = m?.round;
+    let r = m?.round;
     if (!r) return;
+
+    // 打擊停格：動畫時間暫停一下（遊戲模擬照常跑）
+    this.realNow = realNow;
+    if (realNow >= this.hitStopUntil) this.animClock += dt;
+    this.hitFlash = Math.max(0, this.hitFlash - dt * 6);
+    const now = this.animClock;
+
+    // 狀態每 25～50ms 才更新一次；用經過的時間推估 clock，跳躍、拋竿等動畫才會連續
+    if (!m.paused && r.phase !== 'over') {
+      const ext = Math.min(0.1, this.stateAge() / 1000);
+      if (ext > 0) r = { ...r, clock: r.clock + ext };
+    }
 
     if (r.serial !== this.serial) {
       this.serial = r.serial;
@@ -176,6 +211,9 @@ export class PlayScreen {
 
     this.handleEvents(r, now);
     this.particles = this.particles.filter((p) => now - p.t0 < p.dur);
+    const cap = QUALITY[this.renderer.level].particles;
+    if (this.particles.length > cap) this.particles.splice(0, this.particles.length - cap);
+    this.shouts = this.shouts.filter((b) => now - b.t0 < 1.8);
 
     this.renderer.draw({
       round: r,
@@ -184,7 +222,11 @@ export class PlayScreen {
       fightPos: this.fightPos,
       phaseT: now - this.phaseSeenAt,
       shake,
-      flick: Math.max(0, 1 - (now - this.flickAt) / 0.35),
+      flickT: now - this.flickAt,
+      castT: now - this.castAt,
+      ready: { fish: canUlt(r, 'fish'), fisher: canUlt(r, 'fisher') },
+      bubbles: this.shouts,
+      hitFlash: this.hitFlash,
       now,
       particles: this.particles,
       joy: side === 'fish' && r.phase === 'lure' ? this.joy : null,
@@ -243,6 +285,7 @@ export class PlayScreen {
     for (let i = 0; i < 70; i++) {
       this.addParticle({
         kind: 'confetti',
+        screen: true,
         px: w * (0.2 + Math.random() * 0.6),
         py: this.renderer.h * 0.2,
         vx: (Math.random() - 0.5) * 380,
@@ -252,6 +295,29 @@ export class PlayScreen {
         dur: 2 + Math.random(),
       }, now);
     }
+  }
+
+  // 跳出彈跳放大的大字（BLOCK!、+7m! 之類）
+  impact(text, color, now) {
+    this.addParticle({ kind: 'text', screen: true, px: this.renderer.w / 2, py: this.renderer.h * 0.44, text, size: 38, color, pop: true, rise: 30, dur: 0.9 }, now);
+  }
+
+  // 打擊停格 + 白光
+  hitStop(sec) {
+    this.hitStopUntil = (this.realNow || 0) + sec;
+    this.hitFlash = 1;
+  }
+
+  // 角色喊話：用事件 id 挑台詞，雙方看到同一句；有時候換成角色的個人台詞
+  shout(who, kind, e, charId, now) {
+    const pool = SHOUTS[who]?.[kind];
+    const personal = SHOUTS[charId];
+    let lines = pool;
+    if (personal && (kind === 'ult' || e.id % 3 === 0)) lines = personal;
+    if (!lines || !lines.length) return;
+    const text = lines[e.id % lines.length];
+    this.shouts = this.shouts.filter((b) => b.who !== who);
+    this.shouts.push({ who, text, t0: now });
   }
 
   floatText(text, now, opts = {}) {
@@ -292,6 +358,7 @@ export class PlayScreen {
       switch (e.type) {
         case 'cast':
           sfx('cast');
+          this.castAt = now;
           break;
         case 'splash':
           sfx('splash');
@@ -312,6 +379,8 @@ export class PlayScreen {
           this.bubbles(r.fishPos.x, r.fishPos.y, now, 12);
           this.banner(isFisher ? '中魚了！🎣' : '被釣到了！😱', '#ffd84d');
           this.setBite('none');
+          this.hitStop(0.12);
+          this.shout('fisher', 'hooked', e, r.fisher, now);
           break;
         case 'fight':
           this.banner(isFisher ? '收線！別拉斷！' : '快掙扎逃走！');
@@ -331,23 +400,31 @@ export class PlayScreen {
         case 'dash':
           sfx('dash');
           this.impulse = Math.max(this.impulse, 6);
+          if (e.id % 2 === 0) this.shout('fish', 'dash', e, r.fish, now);
           this.bubbles(this.fightPos.x, this.fightPos.y, now, 8);
           if (isFisher) vibrate(80);
           break;
         case 'block':
           sfx('block');
           this.banner(isFisher ? '擋下了！💪' : '被擋住了！');
+          this.impact('BLOCK!', '#7ecbff', now);
+          this.hitStop(0.08);
+          this.shout('fisher', 'block', e, r.fisher, now);
           break;
         case 'dashHit':
           sfx('hit');
           this.impulse = 16;
+          this.impact({ right: '+7m!', left: '鬆線!', up: '+5m!', down: '+5m!' }[e.dir], '#ff6b6b', now);
+          this.hitStop(0.08);
+          this.shout('fish', 'hit', e, r.fish, now);
           if (e.dir === 'left') this.banner(isFisher ? '線鬆了！快收線！' : '衝向漁夫！線鬆了！');
           else this.banner(isFisher ? '被拖走了！' : '衝啊！🌊');
           break;
         case 'jump':
           sfx('jump');
           vibrate([50, 50, 50]);
-          setTimeout(() => this.splash(this.fightPos.x, performance.now() / 1000, 14, 1.2), RULES.jumpWarn * 1000);
+          setTimeout(() => this.splash(this.fightPos.x, this.animClock, 14, 1.2), RULES.jumpWarn * 1000);
+          this.shout('fish', 'jump', e, r.fish, now);
           this.banner(isFisher ? '跳起來了！放手！✋' : '飛起來！🐬', '#ffd84d');
           break;
         case 'land':
@@ -368,6 +445,12 @@ export class PlayScreen {
             sfx('creak');
             vibrate(150);
           }
+          this.impact('危險!', '#ff4d4f', now);
+          this.shout('fisher', 'danger', e, r.fisher, now);
+          break;
+        case 'combo':
+          this.impact(`${e.combo} COMBO!`, e.combo >= 30 ? '#ff6b3d' : '#ffd84d', now);
+          if (e.combo >= 20) this.shout('fisher', 'combo', e, r.fisher, now);
           break;
         case 'ult': {
           sfx('ult');
@@ -377,6 +460,7 @@ export class PlayScreen {
           this.cutIn(e.side, data.emoji, e.name, mine);
           this.impulse = 10;
           if (e.char === 'octopus' && isFisher) this.inkWiped = 0;
+          this.shout(e.side, 'ult', e, e.char, now);
           break;
         }
         case 'end': {
@@ -385,6 +469,10 @@ export class PlayScreen {
           vibrate(iWin ? [80, 40, 80] : 300);
           const head = e.reason === 'caught' ? `釣到${fishData.name}了！` : e.reason === 'snap' ? '啪！線斷了！' : e.winner === 'fish' ? `${fishData.emoji} 逃走了！` : '魚餓暈了！';
           this.banner(`${head} ${iWin ? '🎉' : '😭'}`, iWin ? '#ffd84d' : '#fff');
+          const loserSide = e.winner === 'fish' ? 'fisher' : 'fish';
+          this.shout(e.winner, 'win', e, e.winner === 'fish' ? r.fish : r.fisher, now);
+          this.shout(loserSide, 'lose', { id: e.id + 1 }, loserSide === 'fish' ? r.fish : r.fisher, now + 0.6);
+          if (e.reason === 'caught') this.hitStop(0.15);
           if (e.reason === 'caught') {
             this.flickAt = now;
             this.splash(this.fightPos.x, now, 20, 1.5);
@@ -447,62 +535,103 @@ export class PlayScreen {
     }
   }
 
+  // HUD 只在值改變時才寫 DOM（每幀都寫會一直觸發重排，舊手機會掉幀）
+  text(id, v) {
+    const k = `t:${id}`;
+    if (this.hud.get(k) === v) return;
+    this.hud.set(k, v);
+    $(id).textContent = v;
+  }
+
+  html(id, v) {
+    const k = `h:${id}`;
+    if (this.hud.get(k) === v) return;
+    this.hud.set(k, v);
+    $(id).innerHTML = v;
+  }
+
+  style(id, prop, v) {
+    const k = `s:${id}:${prop}`;
+    if (this.hud.get(k) === v) return;
+    this.hud.set(k, v);
+    if (prop.startsWith('--')) $(id).style.setProperty(prop, v);
+    else $(id).style[prop] = v;
+  }
+
+  hide(id, hidden) {
+    const k = `v:${id}`;
+    if (this.hud.get(k) === hidden) return;
+    this.hud.set(k, hidden);
+    $(id).hidden = hidden;
+  }
+
+  cls(id, name, on) {
+    const k = `c:${id}:${name}`;
+    if (this.hud.get(k) === on) return;
+    this.hud.set(k, on);
+    $(id).classList.toggle(name, on);
+  }
+
+  bar(id, frac) {
+    this.style(id, 'transform', `scaleX(${Math.max(0, Math.min(1, frac)).toFixed(3)})`);
+  }
+
   updateHud(m, r, side) {
     const mode = this.modeFor(r, side);
     if (mode !== this.mode) {
       this.mode = mode;
       this.buildControls(mode, r);
+      // 按鈕重建了，清掉跟按鈕有關的快取
+      for (const k of [...this.hud.keys()]) if (k.includes('ctl-')) this.hud.delete(k);
     }
 
     const op = other(this.me);
-    $('h-me').textContent = m.names[this.me];
-    $('h-op').textContent = m.names[op];
-    $('h-score-me').textContent = m.scores[this.me];
-    $('h-score-op').textContent = m.scores[op];
-    $('h-round').textContent = `第 ${m.roundNo + 1}/${m.totalRounds} 局${r.multiplier > 1 ? ' ×2' : ''} · ${side === 'fish' ? FISH[r.fish].emoji + '魚' : '🎣漁夫'}`;
+    this.text('h-me', m.names[this.me]);
+    this.text('h-op', m.names[op]);
+    this.text('h-score-me', String(m.scores[this.me]));
+    this.text('h-score-op', String(m.scores[op]));
+    this.text('h-round', `第 ${m.roundNo + 1}/${m.totalRounds} 局${r.multiplier > 1 ? ' ×2' : ''} · ${side === 'fish' ? FISH[r.fish].emoji + '魚' : '🎣漁夫'}`);
 
-    const timerEl = $('h-timer');
-    if (r.phase === 'lure' || r.phase === 'fight') {
+    const timed = r.phase === 'lure' || r.phase === 'fight';
+    this.hide('h-timer', !timed);
+    if (timed) {
       const left = Math.max(0, r.phaseEnd - r.clock);
-      timerEl.textContent = `⏱ ${Math.ceil(left)}`;
-      timerEl.classList.toggle('low', left < 10);
-      timerEl.hidden = false;
-    } else timerEl.hidden = true;
+      this.text('h-timer', `⏱ ${Math.ceil(left)}`);
+      this.cls('h-timer', 'low', left < 10);
+    }
 
     const L = r.lure;
-    const status = $('h-status');
     const baits = `<span class="pill">🪱 ×${L.baits}</span>`;
     const eaten = `<span class="pill">🍽 ${L.eaten}/${RULES.eatToWin}</span>`;
-    const statusHtml = r.phase === 'lure' || r.phase === 'hooked' ? baits + eaten : baits;
-    if (status.innerHTML !== statusHtml) status.innerHTML = statusHtml;
+    this.html('h-status', r.phase === 'lure' || r.phase === 'hooked' ? baits + eaten : baits);
 
     // 吃餌進度只有魚看得到
-    const eatBar = $('eat-bar');
-    eatBar.hidden = !(side === 'fish' && r.phase === 'lure');
-    if (!eatBar.hidden) $('eat-fill').style.width = `${L.progress * 100}%`;
+    const showEat = side === 'fish' && r.phase === 'lure';
+    this.hide('eat-bar', !showEat);
+    if (showEat) this.bar('eat-fill', L.progress);
 
     // 拔河儀表
-    const fh = $('fight-hud');
-    fh.hidden = r.phase !== 'fight' || !r.fight;
-    if (!fh.hidden) {
+    const fighting = r.phase === 'fight' && !!r.fight;
+    this.hide('fight-hud', !fighting);
+    let danger = false;
+    if (fighting) {
       const f = r.fight;
       const snapAt = FISHERS[r.fisher].snapAt;
-      const distPct = Math.min(100, (f.d / RULES.escapeDistance) * 100);
-      $('h-dist-fill').style.width = `${100 - distPct}%`;
-      $('h-dist-fish').style.left = `${100 - distPct}%`;
-      $('h-dist-fish').textContent = FISH[r.fish].emoji;
-      $('h-dist').textContent = `${f.d.toFixed(1)}m`;
-      const tPct = Math.min(100, (f.T / snapAt) * 100);
-      const tFill = $('h-tension-fill');
-      tFill.style.width = `${tPct}%`;
+      const distFrac = Math.min(1, f.d / RULES.escapeDistance);
+      this.bar('h-dist-fill', 1 - distFrac);
+      this.style('h-dist-fish', 'left', `${((1 - distFrac) * 100).toFixed(1)}%`);
+      this.text('h-dist-fish', FISH[r.fish].emoji);
+      this.text('h-dist', `${f.d.toFixed(1)}m`);
+      const tFrac = Math.min(1, f.T / snapAt);
+      this.bar('h-tension-fill', tFrac);
       const slack = f.T <= RULES.slackLimit;
-      tFill.style.background = slack ? '#9aa3b5' : tPct > 85 ? 'var(--bad)' : tPct > 60 ? 'var(--warn)' : 'var(--good)';
-      $('h-tension-danger').style.width = '15%';
-      $('h-tension').textContent = slack ? '鬆！' : `${Math.round(f.T)}`;
+      this.style('h-tension-fill', 'background', slack ? '#9aa3b5' : tFrac > 0.85 ? 'var(--bad)' : tFrac > 0.6 ? 'var(--warn)' : 'var(--good)');
+      this.style('h-tension-danger', 'width', '15%');
+      this.text('h-tension', slack ? '鬆！' : `${Math.round(f.T)}`);
+      this.bar('h-stamina-fill', (side === 'fish' ? f.fishSt : f.fisherSt) / 100);
 
       // 張力進入危險區：漁夫的手機一直震、張力條閃紅，進入時提醒一次
-      const danger = tPct >= 85;
-      tFill.parentElement.classList.toggle('danger-on', danger);
+      danger = tFrac >= 0.85;
       if (side === 'fisher') {
         const t = performance.now();
         if (danger && !this.inDanger) this.banner('快斷了！先停手！✋', '#ff4d4f');
@@ -511,58 +640,126 @@ export class PlayScreen {
           vibrate(60);
         }
       }
-      this.inDanger = danger;
-      const st = side === 'fish' ? f.fishSt : f.fisherSt;
-      $('h-stamina-fill').style.width = `${st}%`;
     }
+    this.inDanger = danger;
+    this.cls('h-tension-bar', 'danger-on', danger);
+
+    // 收線連擊
+    const combo = fighting ? r.fight.combo : 0;
+    this.hide('combo', combo < 3);
+    if (combo >= 3) {
+      const fire = combo >= 30 ? ' 🔥🔥' : combo >= 10 ? ' 🔥' : '';
+      this.html('combo', `${side === 'fisher' ? '' : '<small>對方</small>'}連擊 <b>×${combo}</b>${fire}`);
+      this.cls('combo', 'hot', combo >= 10);
+      this.cls('combo', 'fire', combo >= 30);
+      if (combo > this.lastCombo) {
+        const el = $('combo');
+        el.classList.remove('bump');
+        void el.offsetWidth;
+        el.classList.add('bump');
+      }
+    }
+    this.lastCombo = combo;
 
     // 反應提示：漁夫看到要往哪滑
-    const counter = $('counter');
     const dash = r.fight?.dash;
     const showCounter = side === 'fisher' && r.phase === 'fight' && dash && !dash.resolved;
-    counter.hidden = !showCounter;
+    this.hide('counter', !showCounter);
     if (showCounter) {
-      const arrow = $('counter-arrow');
-      const html = `${ARROW[counterDir(dash.dir)]}<small>往這邊滑！</small>`;
-      if (arrow.innerHTML !== html) arrow.innerHTML = html;
+      this.html('counter-arrow', `${ARROW[counterDir(dash.dir)]}<small>往這邊滑！</small>`);
       const total = RULES.dashWindow * (r.clock < r.effects.sonar ? 2 : 1);
-      $('counter-fill').style.width = `${Math.max(0, (dash.deadline - r.clock) / total) * 100}%`;
+      this.bar('counter-fill', (dash.deadline - r.clock) / total);
     }
 
     // 墨汁
-    const ink = $('ink');
     const inked = side === 'fisher' && r.clock < r.effects.ink && !m.paused;
-    ink.hidden = !inked;
-    if (inked) ink.style.opacity = String(Math.max(0, 1 - this.inkWiped));
+    this.hide('ink', !inked);
+    if (inked) this.style('ink', 'opacity', Math.max(0, 1 - this.inkWiped).toFixed(2));
 
     // 按鈕狀態
     const ultBtn = $('controls').querySelector('[data-ctl="ult"]');
     if (ultBtn) {
       const u = r.ult[side];
-      ultBtn.style.setProperty('--p', u.used ? 0 : u.charge);
       const ready = canUlt(r, side);
-      ultBtn.classList.toggle('ready', ready);
-      ultBtn.classList.toggle('used', u.used);
-      ultBtn.disabled = !ready;
+      const key = `${u.used ? 0 : Math.round(u.charge)}|${ready}|${u.used}`;
+      if (this.hud.get('ctl-ult') !== key) {
+        this.hud.set('ctl-ult', key);
+        ultBtn.style.setProperty('--p', u.used ? 0 : Math.round(u.charge));
+        ultBtn.classList.toggle('ready', ready);
+        ultBtn.classList.toggle('used', u.used);
+        ultBtn.disabled = !ready;
+      }
     }
     if (mode === 'fish-lure') {
       const ok = this.inRange(r) && !isFrozen(r);
-      for (const b of $('controls').querySelectorAll('.fake, .real')) b.disabled = !ok;
+      if (this.hud.get('ctl-bite') !== ok) {
+        this.hud.set('ctl-bite', ok);
+        for (const b of $('controls').querySelectorAll('.fake, .real')) b.disabled = !ok;
+      }
     }
     if (mode === 'fisher-lure') {
       const yankBtn = $('controls').querySelector('[data-ctl="yank"]');
-      if (yankBtn) yankBtn.disabled = !(L.bobber && L.bobber.landed);
-      const hint = $('hint');
-      const txt = !L.bobber ? (r.clock < L.readyAt ? '換餌中…' : '點水面拋竿！') : '點水面可以換位置 · 魚真咬時提竿';
-      if (hint.textContent !== txt) hint.textContent = txt;
+      const can = !!(L.bobber && L.bobber.landed);
+      if (yankBtn && this.hud.get('ctl-yank') !== can) {
+        this.hud.set('ctl-yank', can);
+        yankBtn.disabled = !can;
+      }
+      this.text('hint', !L.bobber ? (r.clock < L.readyAt ? '換餌中…' : '點水面拋竿！') : '點水面可以換位置 · 魚真咬時提竿');
     }
     if (mode === 'fish-fight') {
       const f = r.fight;
       const jumpBtn = $('controls').querySelector('[data-ctl="jump"]');
-      if (jumpBtn) jumpBtn.disabled = !!(f.jump || f.dash || isFrozen(r) || r.clock < f.jumpReadyAt || f.fishSt < RULES.jumpCost);
+      const off = !!(f.jump || f.dash || isFrozen(r) || r.clock < f.jumpReadyAt || f.fishSt < RULES.jumpCost);
+      if (jumpBtn && this.hud.get('ctl-jump') !== off) {
+        this.hud.set('ctl-jump', off);
+        jumpBtn.disabled = off;
+      }
     }
 
-    $('pause-overlay').hidden = !m.paused;
+    this.hide('pause-overlay', !m.paused);
+    if (m.paused) this.text('btn-quality', `畫質：${QUALITY_LABEL[this.quality.mode]}${this.quality.mode === 'auto' ? `（${{ high: '高', medium: '中', low: '低' }[this.quality.level]}）` : ''}`);
+  }
+
+  // ---------- 畫質 ----------
+
+  applyQuality() {
+    const q = this.quality;
+    if (q.mode === 'high') q.level = 'high';
+    else if (q.mode === 'low') q.level = 'low';
+    this.renderer.setQuality(q.level);
+  }
+
+  // 自動模式：最近的幀時間太長就降一級（不自動升級，避免忽高忽低）
+  monitorQuality(rawMs, t) {
+    const q = this.quality;
+    if (q.mode !== 'auto' || rawMs > 500) return; // 切出去回來的大間隔不算
+    q.ema = q.ema * 0.92 + rawMs * 0.08;
+    if (q.ema > 24) {
+      if (!q.badSince) q.badSince = t;
+      if (t - q.badSince > 2) {
+        const i = QUALITY_ORDER.indexOf(q.level);
+        if (i < QUALITY_ORDER.length - 1) {
+          q.level = QUALITY_ORDER[i + 1];
+          this.renderer.setQuality(q.level);
+        }
+        q.badSince = 0;
+        q.ema = 16;
+      }
+    } else {
+      q.badSince = 0;
+    }
+  }
+
+  cycleQuality() {
+    const order = ['auto', 'high', 'low'];
+    const q = this.quality;
+    q.mode = order[(order.indexOf(q.mode) + 1) % order.length];
+    if (q.mode === 'auto') q.level = 'high';
+    try {
+      localStorage.setItem(QUALITY_KEY, q.mode);
+    } catch {}
+    this.applyQuality();
+    this.hud.delete('t:btn-quality');
   }
 
   // ---------- 輸入 ----------
@@ -602,6 +799,7 @@ export class PlayScreen {
   }
 
   bindInput() {
+    $('btn-quality')?.addEventListener('click', () => this.cycleQuality());
     const controls = $('controls');
     const pressed = new Map(); // pointerId → 控制名稱
     controls.addEventListener('pointerdown', (e) => {

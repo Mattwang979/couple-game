@@ -5,6 +5,7 @@
 import { RULES, FISH, FISHERS } from './data.js';
 
 const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
+const COMBO_MILESTONES = [10, 20, 30, 50, 80];
 const DIRS = Object.keys(OPPOSITE);
 
 export function createRound({ fish, fisher, multiplier = 1 }) {
@@ -193,6 +194,8 @@ function startFight(r) {
     T: RULES.tensionBase,
     slackFor: 0,
     overFor: 0, // 張力超過上限多久了
+    combo: 0, // 收線連擊數
+    lastReelAt: -9,
     fishSt: 100,
     fisherSt: 100,
     y: r.fishPos.y, // 魚的深度；水平位置由距離 d 決定
@@ -266,6 +269,7 @@ function stepFight(r) {
 
   if (f.dash && !f.dash.resolved && r.clock >= f.dash.deadline) dashFail(r);
   if (f.dash && f.dash.resolved && r.clock >= f.dash.showUntil) f.dash = null;
+  if (f.combo && r.clock - f.lastReelAt > RULES.comboGap) f.combo = 0;
 
   if (!frozen) {
     f.d += RULES.fishPull * fishData.pull * (0.4 + 0.6 * (f.fishSt / 100)) * dt;
@@ -281,7 +285,10 @@ function stepFight(r) {
   f.d = Math.max(0, f.d);
 
   if (f.T >= fisherData.snapAt) {
-    if (f.overFor === 0) emit(r, 'overload');
+    if (f.overFor === 0) {
+      f.combo = 0;
+      emit(r, 'overload');
+    }
     f.overFor += dt;
     if (f.overFor >= RULES.snapGrace) return end(r, 'fish', 'snap');
   } else {
@@ -299,9 +306,13 @@ function reel(r) {
   const f = r.fight;
   if (fishInAir(r)) {
     f.T += RULES.jumpReelTension;
+    f.combo = 0;
     emit(r, 'reelAir');
     return;
   }
+  f.combo = r.clock - f.lastReelAt <= RULES.comboGap ? f.combo + 1 : 1;
+  f.lastReelAt = r.clock;
+  if (COMBO_MILESTONES.includes(f.combo)) emit(r, 'combo', { combo: f.combo });
   if (active(r, 'puff')) {
     f.T += 2;
     return;

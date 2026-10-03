@@ -19,6 +19,7 @@ let match = null;
 let screens = null;
 let play = null;
 let lastHeard = 0;
+let lastStateAt = 0; // 最近一次拿到新狀態的時間（房主：模擬一步；對方：收到封包）
 let ended = false;
 const timers = [];
 
@@ -120,6 +121,7 @@ function onMessage(msg) {
     }
   } else if (msg.t === 'state') {
     match = msg.s;
+    lastStateAt = performance.now();
     refresh();
   }
 }
@@ -132,6 +134,7 @@ function startHostLoop() {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     tickMatch(match, dt);
+    lastStateAt = now;
     refresh();
     if (++n % 2 === 0) broadcast();
   }, 25));
@@ -140,7 +143,7 @@ function startHostLoop() {
 function beginSession(role) {
   me = role;
   screens = new Screens({ send, me });
-  play = new PlayScreen({ send, getMatch: () => match, me });
+  play = new PlayScreen({ send, getMatch: () => match, me, stateAge: () => performance.now() - lastStateAt });
   lastHeard = performance.now();
   link.onMessage = onMessage;
   link.onClose = () => lost('對方離開了。');

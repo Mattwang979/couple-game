@@ -160,6 +160,34 @@ test('每秒穩定點 8 下，面對會掙扎的魚也釣得起來', () => {
   assert.equal(r.result.reason, 'caught');
 });
 
+test('連續收線會累積連擊，停手或魚在空中時收線會中斷', () => {
+  const r = fight('carp', 'oldman');
+  for (let i = 0; i < 12; i++) {
+    applyInput(r, 'fisher', { type: 'reel' });
+    run(r, 0.2);
+  }
+  assert.equal(r.fight.combo, 12);
+  assert.ok(r.events.some((e) => e.type === 'combo' && e.combo === 10));
+  run(r, RULES.comboGap + 0.1);
+  assert.equal(r.fight.combo, 0);
+  applyInput(r, 'fisher', { type: 'reel' });
+  applyInput(r, 'fisher', { type: 'reel' });
+  assert.equal(r.fight.combo, 2);
+  applyInput(r, 'fish', { type: 'jump' });
+  run(r, RULES.jumpWarn + 0.05);
+  applyInput(r, 'fisher', { type: 'reel' });
+  assert.equal(r.fight.combo, 0);
+});
+
+test('張力爆表會中斷連擊', () => {
+  const r = fight('carp', 'pirate');
+  applyInput(r, 'fisher', { type: 'reel' });
+  applyInput(r, 'fisher', { type: 'reel' });
+  r.fight.T = 120;
+  stepRound(r, DT, rng);
+  assert.equal(r.fight.combo, 0);
+});
+
 test('往上竄或下潛會改變魚的深度', () => {
   const r = fight();
   const y = r.fight.y;
