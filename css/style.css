@@ -274,7 +274,7 @@ input:focus { outline: none; border-color: var(--sea); }
   color: inherit;
 }
 .pill.icon { pointer-events: auto; cursor: pointer; }
-.pill.timer.low { background: var(--bad); color: #fff; }
+.pill.timer.low { background: var(--bad); color: #fff; animation: pulse 0.5s ease-in-out infinite alternate; }
 .status .pill { font-size: 0.85rem; }
 
 #fight-hud {
@@ -388,21 +388,41 @@ input:focus { outline: none; border-color: var(--sea); }
 }
 @keyframes speed { to { background-position: -26px 0; } }
 
-.counter { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); text-align: center; pointer-events: none; }
-.counter[hidden] { display: none; }
-.counter .arrow {
-  font-size: 4.5rem;
-  font-weight: 900;
-  color: #fff;
+.counter-time span { display: block; width: 100%; height: 100%; background: var(--bad); transform-origin: left center; }
+
+/* 魚衝刺時漁夫的反制按鈕：放在收線鈕正上方，拇指一移就按得到 */
+.counter {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(126px + var(--safe-b));
+  z-index: 28;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 16px;
+  border: none;
+  border-radius: 22px;
   background: var(--bad);
-  border-radius: 24px;
-  padding: 0 18px;
-  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.6);
-  animation: shake 0.15s infinite alternate;
+  color: #fff;
+  font: inherit;
+  font-weight: 900;
+  text-align: left;
+  box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.75), 0 8px 0 rgba(0, 0, 0, 0.25);
+  animation: shake 0.12s infinite alternate;
+  touch-action: none;
+  cursor: pointer;
 }
-.counter .arrow small { display: block; font-size: 1rem; margin-top: -8px; padding-bottom: 6px; }
-.counter-time { margin-top: 8px; height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.6); overflow: hidden; }
-.counter-time div { width: 100%; height: 100%; background: var(--bad); transform-origin: left center; }
+.counter[hidden] { display: none; }
+.counter .arrow { font-size: 3.4rem; line-height: 1; }
+.counter-text { flex: 1; font-size: 1.15rem; line-height: 1.3; }
+.counter-time { position: absolute; left: 16px; right: 16px; bottom: 7px; height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.45); overflow: hidden; }
+
+/* 力量對決條：藍色是漁夫、橘色是魚 */
+.bar.power { background: var(--fish); overflow: visible; }
+.bar.power > div:first-child { background: var(--fisher); border-radius: 999px 0 0 999px; transform: scaleX(0.5); }
+.bar.power .spark { position: absolute; top: -6px; font-size: 18px; margin-left: -9px; left: 50%; animation: pulse 0.25s ease-in-out infinite alternate; }
+.power-ends { font-size: 0.75rem; }
 
 /* 收線連擊 */
 .combo {
@@ -492,6 +512,16 @@ input:focus { outline: none; border-color: var(--sea); }
   font-size: 0.75rem;
 }
 .ctl.ult.ready { animation: glow 0.8s ease-in-out infinite alternate; }
+/* 有集氣 / 冷卻環的按鈕（掙扎鈕的衝刺氣、聲納冷卻） */
+.ctl.gauge {
+  /* 已集的部分維持原色，還沒集的部分變暗 */
+  background:
+    conic-gradient(transparent calc(var(--p, 0) * 1%), rgba(20, 35, 60, 0.35) 0) border-box,
+    var(--gauge-bg, var(--sea-dark));
+}
+.ctl.struggle { --gauge-bg: var(--fish); }
+.ctl.gauge.ready { animation: glow 0.6s ease-in-out infinite alternate; }
+.ctl.ping { --gauge-bg: #17a589; min-width: 76px; font-size: 0.85rem; }
 .ctl.ult.used { background: #9aa3b5; }
 @keyframes glow { to { box-shadow: 0 6px 0 rgba(0, 0, 0, 0.2), 0 0 18px 6px #ffd84d; } }
 

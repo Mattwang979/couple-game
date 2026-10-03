@@ -76,6 +76,12 @@ const SOUNDS = {
   win: () => [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, dur: 0.18, type: 'triangle', vol: 0.15, delay: i * 0.12 })),
   lose: () => [392, 330, 262].forEach((f, i) => tone({ freq: f, dur: 0.25, type: 'triangle', vol: 0.15, delay: i * 0.18 })),
   tick: () => tone({ freq: 1000, dur: 0.04, vol: 0.06 }),
+  alarm: () => [0, 0.12].forEach((d) => tone({ freq: 880, to: 660, dur: 0.1, type: 'square', vol: 0.1, delay: d })),
+  sonar: () => tone({ freq: 1500, to: 1400, dur: 0.6, type: 'sine', vol: 0.12 }),
+  heart: () => {
+    tone({ freq: 70, to: 50, dur: 0.12, vol: 0.35 });
+    tone({ freq: 60, to: 45, dur: 0.12, vol: 0.25, delay: 0.16 });
+  },
   creak: () => [0, 0.07, 0.14].forEach((d) => tone({ freq: 180, to: 120, dur: 0.06, type: 'sawtooth', vol: 0.12, delay: d })),
 };
 

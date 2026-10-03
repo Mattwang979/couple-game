@@ -29,6 +29,11 @@ export function createRound({ fish, fisher, multiplier = 1 }) {
       bite: 'none', // none | fake | real
       biteStart: 0,
       lastRealEnd: -99,
+      pingReadyAt: 0, // 聲納下次可用的時間
+      ping: null, // { at, found, x, y }
+      shrimp: null, // { x, y, until }
+      nextShrimpAt: RULES.shrimpFirst,
+      hurried: false, // 最後 10 秒提示發過了沒
     },
     fight: null,
     ult: { fish: { charge: 0, used: false }, fisher: { charge: 0, used: false } },
@@ -62,6 +67,15 @@ export function fishInRange(r) {
   const dx = r.fishPos.x - b.x;
   const dy = r.fishPos.y - b.y;
   return Math.hypot(dx, dy) <= FISH[r.fish].biteRange;
+}
+
+// 魚躲在海草叢裡：漁夫看不到魚影，聲納也掃不到
+export function inSeaweed(pos) {
+  return pos.y >= RULES.hideDepth && RULES.hideZones.some((z) => pos.x >= z[0] && pos.x <= z[1]);
+}
+
+export function pingCooldown(fisher) {
+  return FISHERS[fisher].pingCooldown ?? RULES.pingCooldown;
 }
 
 // 浮標下沉程度 0~1，給畫面用。有「破綻」的魚，真咬會越沉越深。
@@ -161,9 +175,48 @@ function yank(r) {
   if (L.baits <= 0) end(r, 'fish', 'nobait');
 }
 
+function ping(r) {
+  const L = r.lure;
+  if (r.clock < L.pingReadyAt) return;
+  L.pingReadyAt = r.clock + pingCooldown(r.fisher);
+  const found = !inSeaweed(r.fishPos);
+  L.ping = { at: r.clock, found, x: r.fishPos.x, y: r.fishPos.y };
+  emit(r, 'ping', { found });
+}
+
+// 小蝦點心：逼魚到處移動、露出行蹤
+function stepShrimp(r, rng) {
+  const L = r.lure;
+  if (!L.shrimp && r.clock >= L.nextShrimpAt) {
+    L.shrimp = { x: 0.3 + rng() * 0.6, y: 0.15 + rng() * 0.7, until: r.clock + RULES.shrimpLife };
+    emit(r, 'shrimpSpawn', { x: L.shrimp.x, y: L.shrimp.y });
+  }
+  if (!L.shrimp) return;
+  if (r.clock >= L.shrimp.until) {
+    L.shrimp = null;
+    L.nextShrimpAt = r.clock + RULES.shrimpEvery[0] + rng() * (RULES.shrimpEvery[1] - RULES.shrimpEvery[0]);
+    return;
+  }
+  const near = Math.hypot(r.fishPos.x - L.shrimp.x, r.fishPos.y - L.shrimp.y) <= RULES.shrimpRange;
+  if (near && !isFrozen(r)) {
+    const { x, y } = L.shrimp;
+    L.shrimp = null;
+    L.nextShrimpAt = r.clock + RULES.shrimpEvery[0] + rng() * (RULES.shrimpEvery[1] - RULES.shrimpEvery[0]);
+    addCharge(r, 'fish', RULES.shrimpCharge);
+    // 吃餌進度最多補到 95%，最後一口還是得真咬
+    L.progress = Math.min(0.95, L.progress + RULES.shrimpProgress);
+    emit(r, 'shrimp', { x, y });
+  }
+}
+
 function stepLure(r, rng) {
   const L = r.lure;
   if (isFrozen(r) && L.bite !== 'none') endBite(r);
+  stepShrimp(r, rng);
+  if (!L.hurried && r.phaseEnd - r.clock <= RULES.hurryTime) {
+    L.hurried = true;
+    emit(r, 'hurry');
+  }
 
   if (!L.bobber && r.clock - L.idleSince >= RULES.autoCastAfter && r.clock >= L.readyAt) {
     cast(r, 0.35 + rng() * 0.5, 0.25 + rng() * 0.5);
@@ -201,7 +254,9 @@ function startFight(r) {
     y: r.fishPos.y, // 魚的深度；水平位置由距離 d 決定
     targetY: r.fishPos.y,
     dash: null, // { dir, deadline, resolved, outcome, showUntil }
-    dashReadyAt: r.clock,
+    dashGauge: 0, // 魚連點掙扎集的衝刺氣，滿 100 才能衝刺
+    fisherRate: 0, // 最近每秒點幾下（力量對決條用）
+    fishRate: 0,
     jump: null, // { airAt, landAt }
     jumpReadyAt: r.clock,
     jumpsQueued: 0,
@@ -255,6 +310,9 @@ function stepFight(r) {
 
   f.fishSt = Math.min(100, f.fishSt + RULES.fishRegen * dt);
   f.fisherSt = Math.min(100, f.fisherSt + RULES.fisherRegen * dt);
+  const decay = Math.exp(-dt / RULES.rateTau);
+  f.fisherRate *= decay;
+  f.fishRate *= decay;
 
   if (f.jump && r.clock >= f.jump.landAt) {
     f.jump = null;
@@ -304,6 +362,7 @@ function stepFight(r) {
 
 function reel(r) {
   const f = r.fight;
+  f.fisherRate += 1 / RULES.rateTau;
   if (fishInAir(r)) {
     f.T += RULES.jumpReelTension;
     f.combo = 0;
@@ -325,14 +384,32 @@ function reel(r) {
   if (f.d <= 0) end(r, 'fisher', 'caught');
 }
 
+// 魚連點掙扎：往外拉、拉緊線、集衝刺氣
+function struggle(r) {
+  const f = r.fight;
+  if (isFrozen(r) || fishInAir(r)) return;
+  f.fishRate += 1 / RULES.rateTau;
+  const tired = f.fishSt < 15 ? 0.5 : 1;
+  f.d += RULES.struggleDistance * FISH[r.fish].pull * tired;
+  f.T += RULES.struggleTension * tired;
+  f.fishSt = Math.max(0, f.fishSt - RULES.struggleCost);
+  if (!f.dash) f.dashGauge = Math.min(100, f.dashGauge + RULES.dashGaugePerTap);
+}
+
+// 衝刺是必殺：要先連點把氣集滿；沒集滿也會回應，不再默默忽略
 function fishSwipe(r, dir) {
   const f = r.fight;
-  if (isFrozen(r) || f.dash || f.jump || f.jumpsQueued > 0) return;
-  if (r.clock < f.dashReadyAt || f.fishSt < RULES.dashCost) return;
+  if (isFrozen(r) || f.dash || f.jump || f.jumpsQueued > 0) {
+    emit(r, 'dashDenied', { reason: 'busy' });
+    return;
+  }
+  if (f.dashGauge < 100) {
+    emit(r, 'dashDenied', { reason: 'gauge' });
+    return;
+  }
   const window = RULES.dashWindow * (active(r, 'sonar') ? 2 : 1);
-  f.fishSt -= RULES.dashCost;
+  f.dashGauge = 0;
   f.dash = { dir, deadline: r.clock + window, resolved: false, outcome: null, showUntil: 0 };
-  f.dashReadyAt = r.clock + window + RULES.dashCooldown;
   if (dir === 'up') f.targetY = clamp(f.y - 0.3, 0.08, 0.9);
   if (dir === 'down') f.targetY = clamp(f.y + 0.3, 0.08, 0.9);
   emit(r, 'dash', { dir });
@@ -455,6 +532,7 @@ export function applyInput(r, side, input) {
     } else if (side === 'fisher') {
       if (t === 'cast' && r.clock >= L.readyAt) cast(r, Number(input.x) || 0.5, Number(input.y) || 0.5);
       else if (t === 'yank') yank(r);
+      else if (t === 'ping') ping(r);
     }
     return;
   }
@@ -462,7 +540,8 @@ export function applyInput(r, side, input) {
   if (r.phase === 'fight') {
     const dir = DIRS.includes(input.dir) ? input.dir : null;
     if (side === 'fish') {
-      if (t === 'swipe' && dir) fishSwipe(r, dir);
+      if (t === 'struggle') struggle(r);
+      else if (t === 'swipe' && dir) fishSwipe(r, dir);
       else if (t === 'jump' && !isFrozen(r) && !r.fight.jump && !r.fight.dash
         && r.fight.jumpsQueued === 0 && r.clock >= r.fight.jumpReadyAt && r.fight.fishSt >= RULES.jumpCost) {
         startJump(r, false);
