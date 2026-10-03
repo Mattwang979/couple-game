@@ -114,7 +114,7 @@ test('一直不收線魚會游走', () => {
 
 test('穩定收線可以釣起魚', () => {
   const r = fight();
-  for (let i = 0; i < 30 * 30 && r.phase === 'fight'; i++) {
+  for (let i = 0; i < 30 * 50 && r.phase === 'fight'; i++) {
     if (i % 4 === 0) applyInput(r, 'fisher', { type: 'reel' }); // 每秒 7.5 下
     stepRound(r, DT, rng);
   }
@@ -132,6 +132,14 @@ test('瘋狂連點會斷線', () => {
   assert.equal(r.result.reason, 'snap');
 });
 
+test('往上竄或下潛會改變魚的深度', () => {
+  const r = fight();
+  const y = r.fight.y;
+  applyInput(r, 'fish', { type: 'swipe', dir: 'down' });
+  run(r, 1);
+  assert.ok(r.fight.y > y + 0.1);
+});
+
 test('魚掙扎時往反方向滑可以擋下', () => {
   const r = fight();
   const d = r.fight.d;
@@ -144,7 +152,7 @@ test('魚掙扎時往反方向滑可以擋下', () => {
 test('沒反應過來魚就衝出去', () => {
   const r = fight();
   const d = r.fight.d;
-  applyInput(r, 'fish', { type: 'swipe', dir: 'up' });
+  applyInput(r, 'fish', { type: 'swipe', dir: 'right' });
   run(r, RULES.dashWindow + 0.05);
   assert.equal(r.fight.dash.outcome, 'hit');
   assert.ok(r.fight.d - d > 6);
@@ -152,7 +160,7 @@ test('沒反應過來魚就衝出去', () => {
 
 test('往漁夫衝會讓線變鬆，沒處理就脫鉤', () => {
   const r = fight();
-  applyInput(r, 'fish', { type: 'swipe', dir: 'down' });
+  applyInput(r, 'fish', { type: 'swipe', dir: 'left' });
   run(r, RULES.dashWindow + 0.05);
   assert.ok(r.fight.T < RULES.slackLimit);
   run(r, RULES.slackTime);
@@ -161,7 +169,7 @@ test('往漁夫衝會讓線變鬆，沒處理就脫鉤', () => {
 
 test('線鬆掉時趕快收線可以救回來', () => {
   const r = fight();
-  applyInput(r, 'fish', { type: 'swipe', dir: 'down' });
+  applyInput(r, 'fish', { type: 'swipe', dir: 'left' });
   run(r, RULES.dashWindow + 0.05);
   applyInput(r, 'fisher', { type: 'reel' });
   applyInput(r, 'fisher', { type: 'reel' });

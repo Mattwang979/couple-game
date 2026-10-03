@@ -53,7 +53,7 @@ test('打完 6 局輪流當魚和漁夫，最後轉輪盤', () => {
     fishers.push(roles.fisher);
     matchAction(m, roles.fisher, { a: 'pick', id: 'oldman' });
     matchAction(m, roles.fish, { a: 'pick', id: 'carp' });
-    tick(m, 2.6 + RULES.lureTime + 2.2); // 讓魚餓暈
+    tick(m, 2.6 + RULES.lureTime + RULES.endShowTime + 0.2); // 讓魚餓暈
     assert.equal(m.screen, 'roundEnd');
     matchAction(m, 'host', { a: 'ready' });
     matchAction(m, 'guest', { a: 'ready' });

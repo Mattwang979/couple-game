@@ -322,7 +322,7 @@ input:focus { outline: none; border-color: var(--sea); }
   position: absolute;
   left: 0;
   right: 0;
-  top: 54%;
+  top: 64%;
   text-align: center;
   font-size: 2.4rem;
   font-weight: 900;
@@ -341,6 +341,49 @@ input:focus { outline: none; border-color: var(--sea); }
   80% { opacity: 1; }
   100% { opacity: 0; transform: translateY(-20px); }
 }
+
+/* 大招 cut-in：斜色帶從左邊滑進來再滑出去 */
+.cutin {
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  top: 36%;
+  height: 120px;
+  pointer-events: none;
+  z-index: 30;
+  display: none;
+}
+.cutin.show { display: block; }
+.cutin .band {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  animation: cutin 1.2s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+.cutin .band::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.18) 0 3px, transparent 3px 26px);
+  animation: speed 0.25s linear infinite;
+}
+.cutin.fish .band { background: linear-gradient(90deg, #ff9f43, #ff6f91); }
+.cutin.fisher .band { background: linear-gradient(90deg, #3d9be9, #8e5cf7); }
+.cutin .face { font-size: 72px; filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.25)); animation: pulse 0.3s ease-in-out infinite alternate; }
+.cutin .txt { font-size: 2.2rem; font-weight: 900; -webkit-text-stroke: 1.5px rgba(20, 35, 60, 0.5); text-shadow: 0 4px 0 rgba(20, 35, 60, 0.35); }
+.cutin .txt small { display: block; font-size: 0.95rem; -webkit-text-stroke: 0; opacity: 0.9; }
+@keyframes cutin {
+  0% { transform: skewY(-5deg) translateX(-110%); }
+  14% { transform: skewY(-5deg) translateX(0); }
+  82% { transform: skewY(-5deg) translateX(0); }
+  100% { transform: skewY(-5deg) translateX(110%); }
+}
+@keyframes speed { to { background-position: -26px 0; } }
 
 .counter { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); text-align: center; pointer-events: none; }
 .counter[hidden] { display: none; }

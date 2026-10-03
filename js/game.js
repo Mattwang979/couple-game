@@ -1,5 +1,6 @@
 // 單局模擬：只有房主的手機在跑，結果再同步給對方。
 // 純資料、沒有 DOM，可以直接用 node 測試。
+// 座標是側面剖面：x 0~1 是水平位置（左邊是碼頭），y 0~1 是水深（0 是水面）。
 
 import { RULES, FISH, FISHERS } from './data.js';
 
@@ -15,12 +16,12 @@ export function createRound({ fish, fisher, multiplier = 1 }) {
     phase: 'lure', // lure → hooked → fight → over
     phaseStart: 0,
     phaseEnd: RULES.lureTime,
-    fishPos: { x: 0.5, y: 0.25, dir: 1 },
+    fishPos: { x: 0.6, y: 0.45, dir: -1 },
     lure: {
       baits: FISHERS[fisher].baits,
       eaten: 0,
       progress: 0,
-      bobber: null, // { x, y, landAt, landed }
+      bobber: null, // { x, y, landAt, landed }：x 是浮標位置，y 是魚鉤深度
       castAt: -99,
       readyAt: 0, // 下次可以拋竿的時間
       idleSince: 0, // 浮標不在水裡的起始時間
@@ -119,8 +120,8 @@ function cast(r, x, y) {
   endBite(r);
   L.lastRealEnd = -99;
   L.bobber = {
-    x: clamp(x, 0.08, 0.92),
-    y: clamp(y, 0.12, 0.78),
+    x: clamp(x, 0.25, 0.94),
+    y: clamp(y, 0.12, 0.88),
     landAt: r.clock + RULES.castFlight,
     landed: false,
   };
@@ -164,7 +165,7 @@ function stepLure(r, rng) {
   if (isFrozen(r) && L.bite !== 'none') endBite(r);
 
   if (!L.bobber && r.clock - L.idleSince >= RULES.autoCastAfter && r.clock >= L.readyAt) {
-    cast(r, 0.2 + rng() * 0.6, 0.25 + rng() * 0.45);
+    cast(r, 0.35 + rng() * 0.5, 0.25 + rng() * 0.5);
   }
   if (L.bobber && !L.bobber.landed && r.clock >= L.bobber.landAt) {
     L.bobber.landed = true;
@@ -193,8 +194,8 @@ function startFight(r) {
     slackFor: 0,
     fishSt: 100,
     fisherSt: 100,
-    x: r.fishPos.x,
-    targetX: r.fishPos.x,
+    y: r.fishPos.y, // 魚的深度；水平位置由距離 d 決定
+    targetY: r.fishPos.y,
     dash: null, // { dir, deadline, resolved, outcome, showUntil }
     dashReadyAt: r.clock,
     jump: null, // { airAt, landAt }
@@ -225,15 +226,16 @@ function dashFail(r) {
   f.dash.resolved = true;
   f.dash.outcome = 'hit';
   f.dash.showUntil = r.clock + 0.6;
-  if (dir === 'up') {
+  if (dir === 'right') {
     // 往外衝
     f.d += 7;
     f.T += 25;
-  } else if (dir === 'down') {
+  } else if (dir === 'left') {
     // 往漁夫衝 → 線突然變鬆
     f.d -= 3;
     f.T -= 40;
   } else {
+    // 往上竄或往下潛
     f.d += 5;
     f.T += 18;
   }
@@ -270,7 +272,7 @@ function stepFight(r) {
   // 線鬆掉時不會自己繃緊，只能靠收線拉回來
   if (f.T > RULES.slackLimit) f.T += (RULES.tensionBase - f.T) * Math.min(1, RULES.tensionRelax * dt);
   f.T = Math.max(0, f.T);
-  f.x += (f.targetX - f.x) * Math.min(1, 2.5 * dt);
+  f.y += (f.targetY - f.y) * Math.min(1, 2.5 * dt);
 
   const steady = active(r, 'steady');
   if (steady) f.T = 50;
@@ -312,8 +314,8 @@ function fishSwipe(r, dir) {
   f.fishSt -= RULES.dashCost;
   f.dash = { dir, deadline: r.clock + window, resolved: false, outcome: null, showUntil: 0 };
   f.dashReadyAt = r.clock + window + RULES.dashCooldown;
-  if (dir === 'left') f.targetX = clamp(f.x - 0.25, 0.1, 0.9);
-  if (dir === 'right') f.targetX = clamp(f.x + 0.25, 0.1, 0.9);
+  if (dir === 'up') f.targetY = clamp(f.y - 0.3, 0.08, 0.9);
+  if (dir === 'down') f.targetY = clamp(f.y + 0.3, 0.08, 0.9);
   emit(r, 'dash', { dir });
 }
 
@@ -419,7 +421,7 @@ export function applyInput(r, side, input) {
         const y = Number(input.y);
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         r.fishPos.x = clamp(x, 0.04, 0.96);
-        r.fishPos.y = clamp(y, 0.06, 0.9);
+        r.fishPos.y = clamp(y, 0.06, 0.92);
         if (input.dir === 1 || input.dir === -1) r.fishPos.dir = input.dir;
       } else if (t === 'bite') {
         const mode = input.mode;

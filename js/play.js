@@ -3,11 +3,12 @@
 import { FISH, FISHERS, RULES } from './data.js';
 import { canUlt, fishInRange, counterDir, isFrozen } from './game.js';
 import { sideOf, other } from './match.js';
-import { Renderer } from './render.js';
+import { Renderer, fightX } from './render.js';
 import { sfx, vibrate, unlockAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const ARROW = { left: '⬅', right: '➡', up: '⬆', down: '⬇' };
+const CONFETTI = ['#ff6f91', '#ffd84d', '#4fb8e8', '#7ee0c3', '#b7a6ff', '#ff9f43'];
 
 export class PlayScreen {
   // send(action)：送出玩家動作；getMatch()：最新比賽狀態；me：'host' | 'guest'
@@ -21,13 +22,19 @@ export class PlayScreen {
     this.serial = null;
     this.lastEventId = 0;
     this.mode = null;
-    this.fishPos = { x: 0.5, y: 0.25, dir: 1 };
-    this.displayPos = { x: 0.5, y: 0.25, dir: 1 };
+    this.fishPos = { x: 0.6, y: 0.45, dir: -1 };
+    this.displayPos = { x: 0.6, y: 0.45, dir: -1 };
+    this.fightPos = { x: 0.7, y: 0.45 };
+    this.phase = null;
+    this.phaseSeenAt = 0;
+    this.impulse = 0; // 事件造成的畫面震動，會慢慢衰減
+    this.flickAt = -9;
     this.joy = null;
     this.keys = new Set();
     this.bite = 'none';
     this.lastMoveSent = 0;
     this.lastRipple = 0;
+    this.lastBubble = 0;
     this.prevPos = null;
     this.inkWiped = 0;
     this.inkUntil = 0;
@@ -85,6 +92,12 @@ export class PlayScreen {
       this.displayPos = { ...r.fishPos };
       this.inkWiped = 0;
       this.bite = 'none';
+      this.impulse = 0;
+    }
+    if (r.phase !== this.phase) {
+      this.phase = r.phase;
+      this.phaseSeenAt = now;
+      if (r.phase === 'fight' && r.fight) this.fightPos = { x: this.displayPos.x, y: this.displayPos.y };
     }
 
     const side = this.side;
@@ -96,7 +109,7 @@ export class PlayScreen {
       const speed = FISH[r.fish].speed;
       if (v.x || v.y) {
         this.fishPos.x = Math.max(0.04, Math.min(0.96, this.fishPos.x + v.x * speed * dt));
-        this.fishPos.y = Math.max(0.06, Math.min(0.9, this.fishPos.y + v.y * speed * dt * 1.2));
+        this.fishPos.y = Math.max(0.06, Math.min(0.92, this.fishPos.y + v.y * speed * dt * 1.2));
         if (Math.abs(v.x) > 0.15) this.fishPos.dir = v.x > 0 ? 1 : -1;
       }
       if (now - this.lastMoveSent > 0.05) {
@@ -113,22 +126,48 @@ export class PlayScreen {
       if (side === 'fish') this.fishPos = { ...r.fishPos };
     }
 
-    // 魚游動的漣漪（漁夫找魚的線索）
+    // 魚游動會冒氣泡、靠近水面會起漣漪（漁夫找魚的線索）
     if (r.phase === 'lure') {
       const p = this.displayPos;
       if (this.prevPos) {
         const speed = Math.hypot(p.x - this.prevPos.x, p.y - this.prevPos.y) / Math.max(dt, 0.001);
-        if (speed > 0.12 && now - this.lastRipple > 0.35) {
+        if (speed > 0.1 && now - this.lastBubble > 0.18) {
+          this.lastBubble = now;
+          this.addParticle({ kind: 'bubble', x: p.x - p.dir * 0.03, y: p.y, size: 2 + Math.random() * 3, dur: 1.6 }, now);
+        }
+        if (speed > 0.1 && p.y < 0.22 && now - this.lastRipple > 0.4) {
           this.lastRipple = now;
-          this.addParticle({ kind: 'ripple', x: p.x, y: p.y, dur: 1.2, size: 26, alpha: 0.7 }, now);
+          this.addParticle({ kind: 'ripple', x: p.x, dur: 1.2, size: 30, alpha: 0.8 }, now);
         }
       }
       this.prevPos = { ...p };
       if (r.lure.bite !== 'none' && r.lure.bobber && now - this.lastRipple > 0.25) {
         this.lastRipple = now;
-        this.addParticle({ kind: 'ripple', x: r.lure.bobber.x, y: r.lure.bobber.y, dur: 0.8, size: 22, alpha: 0.9 }, now);
+        this.addParticle({ kind: 'ripple', x: r.lure.bobber.x, dur: 0.8, size: 24, alpha: 0.9 }, now);
       }
     }
+
+    // 拔河時魚的位置平滑移動
+    if (r.fight && (r.phase === 'fight' || r.phase === 'over')) {
+      const k = 1 - Math.exp(-6 * dt);
+      const tx = r.phase === 'over' ? this.fightPos.x : fightX(r.fight.d);
+      this.fightPos.x += (tx - this.fightPos.x) * k;
+      this.fightPos.y += (r.fight.y - this.fightPos.y) * k;
+      if (r.phase === 'fight' && now - this.lastBubble > 0.25) {
+        this.lastBubble = now;
+        this.addParticle({ kind: 'bubble', x: this.fightPos.x + 0.03, y: this.fightPos.y, size: 3, dur: 1.2 }, now);
+      }
+    }
+
+    // 畫面震動：事件衝擊 + 張力越高越晃
+    this.impulse *= Math.exp(-6 * dt);
+    let shakeAmp = this.impulse;
+    if (r.phase === 'fight' && r.fight) {
+      const ratio = r.fight.T / FISHERS[r.fisher].snapAt;
+      shakeAmp += Math.max(0, ratio - 0.6) * 22;
+    }
+    if (r.phase === 'hooked') shakeAmp += 5;
+    const shake = { x: (Math.random() - 0.5) * shakeAmp, y: (Math.random() - 0.5) * shakeAmp };
 
     // 範圍外自動放開咬餌
     if (side === 'fish' && this.bite !== 'none' && r.phase === 'lure' && !this.inRange(r)) this.setBite('none');
@@ -140,6 +179,10 @@ export class PlayScreen {
       round: r,
       side,
       fishPos: this.displayPos,
+      fightPos: this.fightPos,
+      phaseT: now - this.phaseSeenAt,
+      shake,
+      flick: Math.max(0, 1 - (now - this.flickAt) / 0.35),
       now,
       particles: this.particles,
       joy: side === 'fish' && r.phase === 'lure' ? this.joy : null,
@@ -177,12 +220,51 @@ export class PlayScreen {
     this.particles.push({ t0: now, ...p });
   }
 
-  splash(x, y, now, n = 8) {
-    this.addParticle({ kind: 'ripple', x, y, dur: 1, size: 40, alpha: 1 }, now);
+  // 水面水花（x 是水平位置）
+  splash(x, now, n = 10, power = 1) {
+    this.addParticle({ kind: 'ripple', x, dur: 1, size: 44 * power, alpha: 1 }, now);
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      this.addParticle({ kind: 'drop', x, y, vx: Math.cos(a) * 1.5, vy: Math.sin(a) * 1.2 - 2, dur: 0.6 }, now);
+      const vx = (Math.random() - 0.5) * 3 * power;
+      const vy = -(2 + Math.random() * 3) * power;
+      this.addParticle({ kind: 'drop', x, vx, vy, size: 2 + Math.random() * 2.5, dur: 0.5 + Math.random() * 0.4 }, now);
     }
+  }
+
+  bubbles(x, y, now, n) {
+    for (let i = 0; i < n; i++) {
+      this.addParticle({ kind: 'bubble', x: x + (Math.random() - 0.5) * 0.06, y: y + Math.random() * 0.05, size: 2 + Math.random() * 4, dur: 1 + Math.random() }, now);
+    }
+  }
+
+  confetti(now) {
+    const w = this.renderer.w;
+    for (let i = 0; i < 70; i++) {
+      this.addParticle({
+        kind: 'confetti',
+        px: w * (0.2 + Math.random() * 0.6),
+        py: this.renderer.h * 0.2,
+        vx: (Math.random() - 0.5) * 380,
+        vy: -150 - Math.random() * 350,
+        spin: (Math.random() - 0.5) * 20,
+        color: CONFETTI[i % CONFETTI.length],
+        dur: 2 + Math.random(),
+      }, now);
+    }
+  }
+
+  floatText(text, now, opts = {}) {
+    this.addParticle({ kind: 'text', screen: true, px: this.renderer.w / 2, py: this.renderer.h * 0.25, size: 34, color: '#ffd84d', dur: 1.6, text, ...opts }, now);
+  }
+
+  // 大招 cut-in
+  cutIn(side, emoji, name, mine) {
+    const el = $('cutin');
+    el.className = `cutin ${side}`;
+    el.innerHTML = `<div class="band"><span class="face">${emoji}</span><span class="txt"><small>${mine ? '大招！' : '對方的大招！'}</small>${name}</span></div>`;
+    void el.offsetWidth;
+    el.classList.add('show');
+    clearTimeout(this.cutinTimer);
+    this.cutinTimer = setTimeout(() => el.classList.remove('show'), 1200);
   }
 
   // ---------- 事件回饋 ----------
@@ -211,7 +293,7 @@ export class PlayScreen {
           break;
         case 'splash':
           sfx('splash');
-          this.splash(e.x, e.y, now, 6);
+          this.splash(e.x, now, 8, 0.7);
           break;
         case 'dip':
           if (isFisher) {
@@ -222,7 +304,10 @@ export class PlayScreen {
         case 'hooked':
           sfx('hooked');
           vibrate([120, 60, 220]);
-          this.splash(r.fishPos.x, r.fishPos.y, now, 14);
+          this.flickAt = now;
+          this.impulse = 18;
+          this.splash(r.fishPos.x, now, 16, 1.3);
+          this.bubbles(r.fishPos.x, r.fishPos.y, now, 12);
           this.banner(isFisher ? '中魚了！🎣' : '被釣到了！😱', '#ffd84d');
           this.setBite('none');
           break;
@@ -231,6 +316,7 @@ export class PlayScreen {
           break;
         case 'miss':
           sfx('miss');
+          this.flickAt = now;
           if (isFisher) this.banner(e.wasFake ? '被騙了！🪱 -1' : '落空！🪱 -1');
           else this.banner(e.wasFake ? '騙到了！😏' : '嚇我一跳！');
           break;
@@ -238,9 +324,12 @@ export class PlayScreen {
           sfx('eaten');
           vibrate(60);
           this.banner(isFisher ? `餌被吃掉了！(${e.eaten}/${RULES.eatToWin})` : `好吃！🍽 ${e.eaten}/${RULES.eatToWin}`);
+          this.bubbles(this.displayPos.x, this.displayPos.y, now, 6);
           break;
         case 'dash':
           sfx('dash');
+          this.impulse = Math.max(this.impulse, 6);
+          this.bubbles(this.fightPos.x, this.fightPos.y, now, 8);
           if (isFisher) vibrate(80);
           break;
         case 'block':
@@ -249,19 +338,19 @@ export class PlayScreen {
           break;
         case 'dashHit':
           sfx('hit');
-          if (e.dir === 'down') this.banner(isFisher ? '線鬆了！快收線！' : '衝向漁夫！線鬆了！');
+          this.impulse = 16;
+          if (e.dir === 'left') this.banner(isFisher ? '線鬆了！快收線！' : '衝向漁夫！線鬆了！');
           else this.banner(isFisher ? '被拖走了！' : '衝啊！🌊');
           break;
         case 'jump':
           sfx('jump');
           vibrate([50, 50, 50]);
+          setTimeout(() => this.splash(this.fightPos.x, performance.now() / 1000, 14, 1.2), RULES.jumpWarn * 1000);
           this.banner(isFisher ? '跳起來了！放手！✋' : '飛起來！🐬', '#ffd84d');
           break;
         case 'land':
-          if (r.fight) {
-            const y = 0.92 - (r.fight.d / RULES.escapeDistance) * 0.88;
-            this.splash(r.fight.x, y, now, 10);
-          }
+          this.splash(this.fightPos.x, now, 18, 1.4);
+          this.impulse = 12;
           sfx('splash');
           break;
         case 'reelAir':
@@ -274,7 +363,9 @@ export class PlayScreen {
           sfx('ult');
           vibrate(100);
           const mine = e.side === side;
-          this.banner(`${mine ? '' : '對方：'}${e.name}！`, '#ffd84d');
+          const data = e.side === 'fish' ? FISH[r.fish] : FISHERS[r.fisher];
+          this.cutIn(e.side, data.emoji, e.name, mine);
+          this.impulse = 10;
           if (e.char === 'octopus' && isFisher) this.inkWiped = 0;
           break;
         }
@@ -282,8 +373,22 @@ export class PlayScreen {
           const iWin = e.winner === side;
           sfx(e.reason === 'snap' ? 'snap' : iWin ? 'win' : 'lose');
           vibrate(iWin ? [80, 40, 80] : 300);
-          const head = e.reason === 'caught' ? `釣到${fishData.name}了！` : e.winner === 'fish' ? `${fishData.emoji} 逃走了！` : '魚餓暈了！';
+          const head = e.reason === 'caught' ? `釣到${fishData.name}了！` : e.reason === 'snap' ? '啪！線斷了！' : e.winner === 'fish' ? `${fishData.emoji} 逃走了！` : '魚餓暈了！';
           this.banner(`${head} ${iWin ? '🎉' : '😭'}`, iWin ? '#ffd84d' : '#fff');
+          if (e.reason === 'caught') {
+            this.flickAt = now;
+            this.splash(this.fightPos.x, now, 20, 1.5);
+            this.confetti(now);
+            this.floatText(`+${e.points}`, now, { py: this.renderer.h * 0.3, size: 44, dur: 2.4 });
+          } else if (e.reason === 'snap') {
+            this.impulse = 24;
+          } else if (e.reason === 'ate' || e.reason === 'nobait') {
+            this.bubbles(this.displayPos.x, this.displayPos.y, now, 16);
+            this.addParticle({ kind: 'text', x: this.displayPos.x, y: this.displayPos.y - 0.08, text: '嗝～', size: 26, dur: 1.6 }, now);
+          } else if (e.reason === 'starve') {
+            this.addParticle({ kind: 'text', x: this.displayPos.x, y: this.displayPos.y - 0.08, text: '餓…', size: 24, dur: 1.6 }, now);
+          }
+          if (iWin && e.reason !== 'caught') this.confetti(now);
           break;
         }
       }
@@ -312,15 +417,15 @@ export class PlayScreen {
           <button class="ctl fake" data-ctl="fake"><span class="e">🫧</span>假咬</button>
           <button class="ctl real" data-ctl="real"><span class="e">😋</span>真咬</button>
           ${ult}`;
-        hint.textContent = '拖曳畫面游動 · 到浮標旁按住咬餌';
+        hint.textContent = '拖曳畫面游動 · 游到魚鉤旁按住咬餌';
         break;
       case 'fisher-lure':
         el.innerHTML = `${ult}<button class="ctl main" data-ctl="yank"><span class="e">🎣</span>提竿！</button>`;
-        hint.textContent = '點水面拋竿 · 魚真咬時提竿';
+        hint.textContent = '點水裡拋竿（點多深鉤子就沉多深）· 魚真咬時提竿';
         break;
       case 'fish-fight':
         el.innerHTML = `<button class="ctl main" data-ctl="jump"><span class="e">🐬</span>跳！</button>${ult}`;
-        hint.textContent = '在畫面上 ⬅➡⬆⬇ 滑動掙扎';
+        hint.textContent = '滑動掙扎：➡ 往外衝 · ⬅ 衝向漁夫（線會鬆）· ⬆⬇ 竄游';
         break;
       case 'fisher-fight':
         el.innerHTML = `${ult}<button class="ctl main" data-ctl="reel"><span class="e">🌀</span>收線</button>`;
@@ -534,8 +639,9 @@ export class PlayScreen {
       const y = e.clientY - rect.top;
       const moved = Math.hypot(x - gesture.x0, y - gesture.y0);
       if (r && !this.joy && !gesture.done && e.type === 'pointerup' && moved < 15
-        && this.side === 'fisher' && r.phase === 'lure' && y < this.renderer.shoreY) {
-        const [wx, wy] = this.renderer.toWorld(x, y);
+        && this.side === 'fisher' && r.phase === 'lure' && y < this.renderer.bY && x > this.renderer.pierW) {
+        let [wx, wy] = this.renderer.toWorld(x, y);
+        if (wy < 0.05) wy = 0.4; // 點到天空就用預設深度
         this.input({ type: 'cast', x: wx, y: wy });
       }
       this.joy = null;
