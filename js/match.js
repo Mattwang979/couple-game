@@ -198,6 +198,6 @@ export function tickMatch(m, dt, rng = Math.random) {
     }
   } else if (m.screen === 'play' && !m.paused && m.round) {
     stepRound(m.round, dt, rng);
-    if (m.round.phase === 'over' && m.round.clock - m.round.phaseStart >= 2) finishRound(m);
+    if (m.round.phase === 'over' && m.round.clock - m.round.phaseStart >= RULES.endShowTime) finishRound(m);
   }
 }

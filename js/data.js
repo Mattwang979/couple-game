@@ -4,7 +4,7 @@ export const RULES = {
   totalRounds: 6,
 
   // 階段一：暗流試探
-  lureTime: 45, // 秒，時間到魚餓暈 → 漁夫拿一半分數
+  lureTime: 75, // 秒，時間到魚餓暈 → 漁夫拿一半分數
   eatTime: 1.4, // 真咬累積多久吃掉一個餌
   eatToWin: 3, // 吃掉幾個餌魚就贏
   castCooldown: 2, // 拋竿冷卻
@@ -14,10 +14,11 @@ export const RULES = {
   missRecast: 0.8, // 提竿落空後多久可以再拋
 
   // 階段二：熱血拔河
-  hookedPause: 1.2, // 「中魚！」過場
-  fightTime: 40, // 時間到魚掙脫
-  startDistance: 30,
-  escapeDistance: 50,
+  hookedPause: 1.8, // 「中魚！」慢動作特寫
+  endShowTime: 3, // 單局結束後播動畫的時間
+  fightTime: 60, // 時間到魚掙脫
+  startDistance: 40,
+  escapeDistance: 65,
   fishPull: 0.9, // 魚每秒往外拉幾公尺（滿體力）
   tensionBase: 30,
   tensionRelax: 1.2, // 張力回到基準的速度
