@@ -24,6 +24,7 @@ export const RULES = {
   tensionRelax: 1.4, // 張力回到基準的速度
   reelDistance: 0.45, // 每點一下收幾公尺
   reelTension: 5.5, // 每點一下張力增加（穩定每秒 7～9 下最剛好，狂點會爆）
+  comboGap: 0.6, // 兩下收線間隔在這之內算連擊
   snapGrace: 0.35, // 張力超過上限要持續多久才會斷線（給反應時間、抵銷延遲）
   reelCost: 1.5, // 每點一下消耗漁夫體力
   tiredReel: 0.5, // 漁夫體力 < 20 時收線效率
@@ -118,6 +119,7 @@ export const FISHERS = {
     id: 'oldman',
     name: '老漁夫',
     emoji: '👴',
+    look: { head: '👴', body: '#4f9d69', trim: '#2f6b45', hat: 'straw' },
     tag: '穩健型',
     reel: 1,
     snapAt: 115,
@@ -130,6 +132,7 @@ export const FISHERS = {
     id: 'pirate',
     name: '海盜船長',
     emoji: '🏴‍☠️',
+    look: { head: '🧔', body: '#c0392b', trim: '#f1c40f', hat: 'pirate' },
     tag: '爆發型',
     reel: 1.3,
     snapAt: 100,
@@ -142,6 +145,7 @@ export const FISHERS = {
     id: 'scientist',
     name: '科學家',
     emoji: '🧑‍🔬',
+    look: { head: '🧑‍🔬', body: '#f4f7fb', trim: '#9fb3c8', hat: null },
     tag: '偵查型',
     reel: 1,
     snapAt: 100,
@@ -154,6 +158,7 @@ export const FISHERS = {
     id: 'grandma',
     name: '阿嬤',
     emoji: '👵',
+    look: { head: '👵', body: '#e66b9a', trim: '#fff2a8', hat: 'scarf' },
     tag: '心理戰型',
     reel: 1,
     snapAt: 100,
@@ -182,4 +187,35 @@ export const REASONS = {
   unhook: '線太鬆，脫鉤了',
   escape: '魚游走了',
   timeout: '拔河時間到，魚掙脫了',
+};
+
+// 角色喊話：通用台詞 + 每個角色自己的台詞。同一個事件雙方會看到同一句。
+export const SHOUTS = {
+  fisher: {
+    hooked: ['上鉤了！', '中了！！', '抓到你囉！'],
+    combo: ['給我上來！', '喝啊啊啊！', '還沒完呢！'],
+    danger: ['撐住啊！', '線要斷了！', '冷靜冷靜…'],
+    block: ['擋下了！', '想跑？沒門！', '看穿你了！'],
+    hit: ['可惡！', '好大的力氣…', '別跑！'],
+    win: ['看我的！', '大豐收！', '今晚加菜！'],
+    lose: ['不——！', '我的魚啊…', '下次一定…'],
+    ult: ['看招！'],
+  },
+  fish: {
+    dash: ['抓不到我～', '衝啊！', '再見囉！'],
+    jump: ['飛囉～', '看我飛！', '咻——！'],
+    block: ['可惡被擋！', '哼！'],
+    hit: ['嘿嘿～', '太慢啦！', '拖你下水！'],
+    win: ['掰掰～', '我自由了！', '就這樣？'],
+    lose: ['放開我！', '嗚哇——！', '我不甘心！'],
+    ult: ['看招！'],
+  },
+  oldman: ['年輕人，看好了！', '老夫釣了六十年！'],
+  pirate: ['啊哈！上來吧！', '這片海是我的！'],
+  scientist: ['根據計算……就是現在！', '數據不會騙人！'],
+  grandma: ['乖孫，來吃飯囉～', '阿嬤年輕時更猛！'],
+  carp: ['鯉魚躍龍門！', '我要變成龍！'],
+  shark: ['我才是獵人！', '小心你的手指！'],
+  puffer: ['我生氣了喔！', '別惹我！噗！'],
+  octopus: ['墨汁攻擊～', '八隻手都在抵抗！'],
 };

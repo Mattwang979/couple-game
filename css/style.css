@@ -280,8 +280,8 @@ input:focus { outline: none; border-color: var(--sea); }
 #fight-hud {
   position: absolute;
   top: calc(104px + var(--safe-t));
-  left: 12px;
-  right: 12px;
+  left: 27%; /* 左邊留給碼頭上的漁夫 */
+  right: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -295,7 +295,8 @@ input:focus { outline: none; border-color: var(--sea); }
 .meter-label { width: 2.4em; }
 .meter-val { width: 3.2em; text-align: right; }
 .bar { position: relative; flex: 1; height: 14px; border-radius: 999px; background: #dfe9f2; overflow: hidden; }
-.bar > div:first-child { height: 100%; border-radius: 999px; transition: width 0.08s linear; }
+/* 進度條用 scaleX 變化，只交給 GPU 合成，不會觸發重排 */
+.bar > div:first-child { width: 100%; height: 100%; border-radius: 999px; transform-origin: left center; transform: scaleX(0); will-change: transform; }
 .distance > div:first-child { background: linear-gradient(90deg, var(--good), var(--sea)); }
 .distance .marker { position: absolute; top: -4px; font-size: 16px; transform: translateX(-50%); transition: left 0.08s linear; }
 .tension > div:first-child { background: var(--good); }
@@ -317,7 +318,7 @@ input:focus { outline: none; border-color: var(--sea); }
   pointer-events: none;
 }
 .eat-bar[hidden] { display: none; }
-.eat-bar > div { height: 100%; background: var(--fish); }
+.eat-bar > div { width: 100%; height: 100%; background: var(--fish); transform-origin: left center; transform: scaleX(0); }
 .eat-bar span { position: absolute; inset: 0; text-align: center; font-size: 0.75rem; font-weight: 800; line-height: 18px; }
 
 .banner {
@@ -401,7 +402,29 @@ input:focus { outline: none; border-color: var(--sea); }
 }
 .counter .arrow small { display: block; font-size: 1rem; margin-top: -8px; padding-bottom: 6px; }
 .counter-time { margin-top: 8px; height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.6); overflow: hidden; }
-.counter-time div { height: 100%; background: var(--bad); }
+.counter-time div { width: 100%; height: 100%; background: var(--bad); transform-origin: left center; }
+
+/* 收線連擊 */
+.combo {
+  position: absolute;
+  right: 16px;
+  bottom: calc(150px + var(--safe-b));
+  z-index: 26;
+  pointer-events: none;
+  font-size: 1.3rem;
+  font-weight: 900;
+  color: #fff;
+  -webkit-text-stroke: 1px rgba(20, 35, 60, 0.6);
+  text-shadow: 0 3px 0 rgba(20, 35, 60, 0.35);
+}
+.combo[hidden] { display: none; }
+.combo small { font-size: 0.8rem; margin-right: 4px; }
+.combo b { font-size: 1.8rem; }
+.combo.hot { color: #ffd84d; }
+.combo.fire { color: #ff6b3d; font-size: 1.6rem; }
+.combo.fire b { font-size: 2.4rem; }
+.combo.bump { animation: combo-bump 0.18s ease-out; }
+@keyframes combo-bump { 0% { transform: scale(1.35) rotate(-4deg); } 100% { transform: scale(1); } }
 @keyframes shake { to { transform: translateX(4px) rotate(2deg); } }
 
 .play-hint {

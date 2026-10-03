@@ -23,6 +23,8 @@
 2. 每次 `main` 有更新，`.github/workflows/pages.yml` 會自動跑測試並發佈；可以在 Actions 分頁看進度，也能手動按「Run workflow」
 3. 幾分鐘後用手機打開 `https://<帳號>.github.io/couple-game/` 就能玩
 
+如果某支手機玩起來會卡：遊戲預設「自動畫質」，偵測到掉幀會自動降畫質；也可以在暫停選單把畫質切成「低」。
+
 連線用的是 [PeerJS](https://peerjs.com/) 免費的配對伺服器，配對完兩支手機直接 P2P 連線。少數行動網路會擋 P2P，連不上時請兩人連同一個 Wi-Fi。
 
 ## 開發

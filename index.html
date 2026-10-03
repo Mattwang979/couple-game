@@ -85,7 +85,7 @@
         </div>
         <div class="meter">
           <span class="meter-label">張力</span>
-          <div class="bar tension"><div id="h-tension-fill"></div><div id="h-tension-danger" class="danger"></div></div>
+          <div class="bar tension" id="h-tension-bar"><div id="h-tension-fill"></div><div id="h-tension-danger" class="danger"></div></div>
           <span id="h-tension" class="meter-val"></span>
         </div>
         <div class="meter">
@@ -97,6 +97,7 @@
       <div id="eat-bar" class="eat-bar" hidden><div id="eat-fill"></div><span>吃餌進度</span></div>
       <div id="banner" class="banner"></div>
       <div id="cutin" class="cutin"></div>
+      <div id="combo" class="combo" hidden></div>
       <div id="counter" class="counter" hidden><div class="arrow" id="counter-arrow"></div><div class="counter-time"><div id="counter-fill"></div></div></div>
       <p id="hint" class="play-hint"></p>
       <div id="controls" class="controls"></div>
@@ -106,6 +107,8 @@
           <h2>⏸ 暫停中</h2>
           <p>上菜了嗎？慢慢吃～</p>
           <button class="btn big primary" data-act="resume">繼續</button>
+          <button class="btn" id="btn-quality" type="button">畫質：自動</button>
+          <p class="hint">手機會卡的話，把畫質調成「低」</p>
         </div>
       </div>
     </section>
