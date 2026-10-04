@@ -12,27 +12,41 @@ export const RULES = {
   autoCastAfter: 4, // 浮標不在水裡多久會自動拋竿
   hookGrace: 0.2, // 魚放開真咬後還能被提竿的寬限（抵銷網路延遲）
   missRecast: 0.8, // 提竿落空後多久可以再拋
+  pingCooldown: 6, // 漁夫聲納冷卻
+  pingShow: 0.9, // 聲納掃到時魚亮起多久
+  hideZones: [[0.3, 0.42], [0.66, 0.8]], // 海草叢的水平範圍
+  hideDepth: 0.6, // 海草叢從這個深度往下
+  shrimpFirst: 5, // 第一隻小蝦出現的時間
+  shrimpEvery: [8, 12], // 之後每隔幾秒出現
+  shrimpLife: 7, // 小蝦存在幾秒
+  shrimpRange: 0.08, // 魚游到多近算吃到
+  shrimpCharge: 40, // 吃到小蝦加多少大招氣
+  shrimpProgress: 0.25, // 吃到小蝦補多少吃餌進度
+  hurryTime: 10, // 最後幾秒開始提示
 
   // 階段二：熱血拔河
   hookedPause: 1.8, // 「中魚！」慢動作特寫
   endShowTime: 3, // 單局結束後播動畫的時間
   fightTime: 60, // 時間到魚掙脫
-  startDistance: 40,
+  startDistance: 32,
   escapeDistance: 65,
-  fishPull: 0.9, // 魚每秒往外拉幾公尺（滿體力）
+  fishPull: 0.2, // 魚沒在連點時，每秒被動往外拉幾公尺（滿體力）
+  struggleDistance: 0.28, // 魚每點一下掙扎往外拉幾公尺
+  struggleTension: 2.5, // 魚每點一下掙扎增加的張力
+  struggleCost: 0.6, // 魚每點一下掙扎消耗的體力
+  dashGaugePerTap: 2.5, // 每點一下掙扎集多少衝刺氣（滿 100 才能衝刺）
+  rateTau: 0.6, // 力量對決條：點擊速度的平滑時間
   tensionBase: 30,
   tensionRelax: 1.4, // 張力回到基準的速度
   reelDistance: 0.45, // 每點一下收幾公尺
-  reelTension: 5.5, // 每點一下張力增加（穩定每秒 7～9 下最剛好，狂點會爆）
+  reelTension: 4.5, // 每點一下張力增加（魚也在連點時張力會疊上去，要看著張力條）
   comboGap: 0.6, // 兩下收線間隔在這之內算連擊
   snapGrace: 0.35, // 張力超過上限要持續多久才會斷線（給反應時間、抵銷延遲）
-  reelCost: 1.5, // 每點一下消耗漁夫體力
+  reelCost: 1, // 每點一下消耗漁夫體力
   tiredReel: 0.5, // 漁夫體力 < 20 時收線效率
   slackLimit: 8, // 張力低於這個值算鬆線
   slackTime: 1.2, // 鬆線多久會脫鉤
-  dashWindow: 0.8, // 漁夫反應時間
-  dashCost: 18,
-  dashCooldown: 1.0,
+  dashWindow: 1.0, // 漁夫反應時間
   jumpCost: 30,
   jumpWarn: 0.35, // 起跳預備
   jumpAir: 1.0, // 在空中的時間
@@ -151,8 +165,9 @@ export const FISHERS = {
     snapAt: 100,
     baits: 5,
     shadowBonus: 0.14,
-    passive: '魚影看得比較清楚',
-    ult: { name: '聲納', desc: '顯示魚的位置 3 秒；拔河時反應時間加倍 4 秒', phases: ['lure', 'fight'] },
+    pingCooldown: 3.5,
+    passive: '魚影看得比較清楚，聲納冷卻只要 3.5 秒',
+    ult: { name: '超級聲納', desc: '魚的位置亮 3 秒（躲海草叢也沒用）；拔河時反應時間加倍 4 秒', phases: ['lure', 'fight'] },
   },
   grandma: {
     id: 'grandma',

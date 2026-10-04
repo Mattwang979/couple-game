@@ -6,7 +6,7 @@
 // 每幀只貼一次；所有 emoji 都走 sprites.js 的圖片快取；畫質分高 / 中 / 低三級。
 
 import { FISH, FISHERS, RULES } from './data.js';
-import { bobberDip, isFrozen, fishInAir } from './game.js';
+import { bobberDip, isFrozen, fishInAir, inSeaweed } from './game.js';
 import { setSpriteScale, drawSprite } from './sprites.js';
 import { fisherPose, drawFisherman, drawFishChar, drawAura, drawReadyRing, drawBubble } from './characters.js';
 
@@ -299,7 +299,7 @@ export class Renderer {
       s.taut = !s.slack;
       s.bend = s.slack ? 0.03 : clamp01(ratio);
       s.ratio = ratio;
-      fisherState = { state: 'fight', t: v.phaseT, ratio, reeling: r.clock - f.lastReelAt < 0.3 };
+      fisherState = { state: 'fight', t: v.phaseT, ratio, reeling: r.clock - f.lastReelAt < 0.3, react: v.react };
       // 光環強度：漁夫跟連擊有關，魚衝刺時變強
       s.fisherAura = Math.min(1, 0.25 + f.combo / 30);
       s.fishAura = s.fishOpts.dash ? 1 : 0.35 + (1 - f.d / RULES.escapeDistance) * 0.2;
@@ -491,10 +491,13 @@ export class Renderer {
       ctx.fillRect(0, this.sY + 4, this.w, this.bY - this.sY - 6);
     }
 
+    if (r.phase === 'lure') this.drawLureExtras(v, murky);
     if (!s.fish) return;
     const sonar = r.clock < r.effects.sonar && r.phase === 'lure';
+    const hidden = r.phase === 'lure' && inSeaweed(v.fishPos);
     if (murky && !sonar) {
-      const alpha = fishData.shadow + FISHERS[r.fisher].shadowBonus;
+      // 躲在海草叢裡：漁夫連魚影都看不到
+      const alpha = hidden ? 0 : fishData.shadow + FISHERS[r.fisher].shadowBonus;
       const k = r.fish === 'shark' ? 1.6 : 1;
       ctx.fillStyle = `rgba(0,10,25,${alpha + 0.1})`;
       ctx.beginPath();
@@ -526,6 +529,76 @@ export class Renderer {
     }
     if (isFrozen(r) && r.phase !== 'over') drawSprite(ctx, '🍚', s.fish.x, s.fish.y - 38, 26);
     if (s.dizzy) drawSprite(ctx, '💫', s.fish.x, s.fish.y - 30 + Math.sin(v.now * 5) * 3, 26);
+    this.drawKelp(v.now, isFish);
+    if (r.phase === 'lure' && isFish && hidden) drawSprite(ctx, '🙈', s.fish.x + 18, s.fish.y - 26, 18);
+  }
+
+  // 海草叢（魚可以躲進去）：畫在魚的前面，所以魚躲進去會被蓋住
+  drawKelp(now, isFish) {
+    const { ctx } = this;
+    const [, top] = this.toScreen(0, RULES.hideDepth - 0.08);
+    const sway = this.q.seaweedSway;
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = isFish ? 0.75 : 0.95;
+    for (const [x0, x1] of RULES.hideZones) {
+      for (let k = 0; k < 2; k++) {
+        ctx.strokeStyle = k ? '#2f9e4f' : '#1f7a3a';
+        ctx.lineWidth = k ? 5 : 8;
+        ctx.beginPath();
+        const n = 7;
+        for (let i = 0; i < n; i++) {
+          const x = (x0 + ((x1 - x0) * (i + 0.5 + k * 0.4)) / n) * this.w;
+          const hgt = this.bY - top + ((i * 13) % 20);
+          const s2 = sway ? Math.sin(now * 1.2 + i + k * 2) * 10 : 5;
+          ctx.moveTo(x, this.bY + 8);
+          ctx.bezierCurveTo(x + s2, this.bY - hgt * 0.35, x - s2, this.bY - hgt * 0.7, x + s2 * 1.4, this.bY - hgt);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // 等魚階段的小蝦和聲納
+  drawLureExtras(v, murky) {
+    const { ctx } = this;
+    const r = v.round;
+    const L = r.lure;
+    if (L.shrimp) {
+      const [x, y] = this.toScreen(L.shrimp.x, L.shrimp.y);
+      const left = L.shrimp.until - r.clock;
+      ctx.globalAlpha = (murky ? 0.55 : 1) * (left < 1.5 ? 0.5 + 0.5 * Math.sin(v.now * 20) : 1);
+      drawSprite(ctx, '🦐', x + Math.sin(v.now * 3) * 4, y + Math.sin(v.now * 2.3) * 3, 26);
+      ctx.globalAlpha = 1;
+    }
+    const ping = L.ping;
+    if (!ping) return;
+    const age = r.clock - ping.at;
+    if (age < 0 || age > RULES.pingShow + 0.6) return;
+    // 從碼頭發出的掃描波
+    const ox = this.pierW;
+    const oy = this.sY + 10;
+    const rad = age * this.w * 2.2;
+    if (rad < this.w * 1.4) {
+      ctx.strokeStyle = `rgba(90,255,160,${Math.max(0, 0.8 - age)})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(ox, oy, rad, -Math.PI / 2, Math.PI / 2);
+      ctx.stroke();
+    }
+    if (v.side === 'fisher' && age < RULES.pingShow) {
+      const [x, y] = this.toScreen(ping.x, ping.y);
+      if (ping.found) {
+        ctx.strokeStyle = 'rgba(90,255,160,0.95)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x, y, 30 + Math.sin(v.now * 12) * 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 0.85;
+        drawSprite(ctx, FISH[r.fish].emoji, x, y, r.fish === 'shark' ? 54 : 44);
+        ctx.globalAlpha = 1;
+      }
+    }
   }
 
   drawHook(x, y, now) {
@@ -838,6 +911,18 @@ export class Renderer {
           ctx.globalAlpha = 1;
         }
       }
+    }
+
+    // 魚衝刺：漁夫畫面在魚衝過去的那一側閃紅光
+    if (r.phase === 'fight' && r.fight?.dash && !r.fight.dash.resolved && v.side === 'fisher') {
+      const a = 0.35 + 0.3 * Math.sin(now * 25);
+      ctx.fillStyle = `rgba(255,60,60,${a})`;
+      const t = 26;
+      const dir = r.fight.dash.dir;
+      if (dir === 'right') ctx.fillRect(w - t, 0, t, h);
+      else if (dir === 'left') ctx.fillRect(0, 0, t, h);
+      else if (dir === 'up') ctx.fillRect(0, 0, w, t);
+      else ctx.fillRect(0, h - t, w, t);
     }
 
     // 打擊停格的白光

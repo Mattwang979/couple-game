@@ -45,6 +45,19 @@ export function fisherPose(s) {
       p.shake = r > 0.75 ? (r - 0.75) * 10 : 0;
       p.crank = s.reeling ? t * 18 : null;
       p.mood = r > 0.85 ? 'danger' : r > 0.65 ? 'sweat' : null;
+      // 對魚衝刺的反應：擋下時往後猛拉，被拖走時往前踉蹌
+      if (s.react && s.react.t < 0.5) {
+        const k = 1 - s.react.t / 0.5;
+        if (s.react.kind === 'brace') {
+          p.lean += 0.3 * k;
+          p.crouch = 0.9;
+          p.mood = 'excited';
+        } else if (s.react.kind === 'stumble') {
+          p.lean -= 0.45 * k;
+          p.shake = Math.max(p.shake, 4 * k);
+          p.mood = 'sweat';
+        }
+      }
       break;
     }
     case 'win':
